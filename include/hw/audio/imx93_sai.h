@@ -52,6 +52,19 @@ struct IMX93SaiState {
     uint32_t tx_count;          /* words currently in the FIFO */
     uint64_t tx_words;          /* total words clocked out (bookkeeping) */
 
+    /*
+     * Receive FIFO (data line 0) - capture. The receiver synthesises a sample
+     * stream into this FIFO at the audio word rate; as it fills past the
+     * watermark it requests an eDMA burst, which drains RDR0 into memory.
+     */
+    QEMUTimer *rx_timer;
+    uint32_t rx_fifo[IMX93_SAI_FIFO_DEPTH];
+    uint32_t rx_rptr;           /* read (RDR0 pop) pointer */
+    uint32_t rx_wptr;           /* write (synthesis) pointer */
+    uint32_t rx_count;          /* words currently in the FIFO */
+    uint64_t rx_words;          /* total words captured (bookkeeping) */
+    uint16_t rx_phase;          /* sawtooth-synthesis phase */
+
     /* Audio backend: clocked-out samples go to an -audiodev (e.g. wav). */
     AudioBackend *audio_be;
     SWVoiceOut *voice;
