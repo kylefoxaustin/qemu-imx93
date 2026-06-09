@@ -213,6 +213,12 @@ static bool lcdif_update_display(void *opaque)
     drawfn fn;
     int first = 0, last = 0;
 
+    if (getenv("LCDIF_DBG")) {
+        fprintf(stderr, "[lcdif] UPDATE en=%d w=%u h=%u descl5=0x%x\n",
+                lcdif_is_enabled(s), width, height,
+                lcdif_reg(s, LCDC_V8_CTRLDESCL0_5));
+    }
+
     if (!lcdif_is_enabled(s) || width == 0 || height == 0) {
         return true;
     }
@@ -283,6 +289,13 @@ static void lcdif_write(void *opaque, hwaddr offset, uint64_t value,
     IMX93LcdifState *s = opaque;
     uint32_t val = value;
     hwaddr idx;
+
+    if (getenv("LCDIF_DBG") &&
+        (offset == LCDC_V8_CTRLDESCL0_5 || offset == LCDC_V8_CTRLDESCL0_1 ||
+         offset == LCDC_V8_CTRL || offset == REG_SET || offset == REG_CLR)) {
+        fprintf(stderr, "[lcdif] WR +0x%03x = 0x%08x\n",
+                (unsigned)offset, (uint32_t)value);
+    }
 
     /* CTRL has SET/CLR/TOG aliases at +0x4/+0x8/+0xc. */
     if (offset == REG_SET || offset == REG_CLR || offset == REG_TOG) {
