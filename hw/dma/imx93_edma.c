@@ -70,6 +70,31 @@
 #define ATTR_SSIZE(a)   (((a) >> 8) & 0x7)
 #define ITER_MASK       0x7fff
 
+#define NBYTES_SMLOE    (1u << 31)      /* source minor-loop offset enable */
+#define NBYTES_DMLOE    (1u << 30)      /* dest minor-loop offset enable   */
+
+/*
+ * Decode TCD_NBYTES. With SMLOE or DMLOE set (MLOFFYES format) the byte count
+ * is only the low 10 bits and bits[29:10] are a signed minor-loop offset added
+ * to SADDR (if SMLOE) and/or DADDR (if DMLOE) at each minor-loop end - the
+ * way a peripheral walks several data registers (e.g. MICFIL DATACH0..n) then
+ * rewinds. Without SMLOE/DMLOE (MLOFFNO) the whole low 30 bits are the count.
+ */
+static uint32_t edma_decode_nbytes(uint32_t raw, int32_t *mloff)
+{
+    if (raw & (NBYTES_SMLOE | NBYTES_DMLOE)) {
+        int32_t off = (raw >> 10) & 0xfffff;    /* signed 20-bit field */
+
+        if (off & 0x80000) {
+            off |= ~0xfffff;
+        }
+        *mloff = off;
+        return raw & 0x3ff;
+    }
+    *mloff = 0;
+    return raw & 0x3fffffff;
+}
+
 static inline uint32_t ld32(const uint8_t *p)
 {
     return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
@@ -95,12 +120,13 @@ static void edma_run_channel(IMX93EdmaState *s, int ch)
     int16_t soff = (int16_t)ld16(t + TCD_SOFF);
     int16_t doff = (int16_t)ld16(t + TCD_DOFF);
     uint16_t attr = ld16(t + TCD_ATTR);
-    uint32_t nbytes = ld32(t + TCD_NBYTES) & 0x3fffffff; /* mask MLOFF flags */
+    uint32_t raw_nbytes = ld32(t + TCD_NBYTES);
+    int32_t mloff;
+    uint32_t nbytes = edma_decode_nbytes(raw_nbytes, &mloff);
     uint16_t citer = ld16(t + TCD_CITER) & ITER_MASK;
     uint32_t ssize = 1u << ATTR_SSIZE(attr);
     uint32_t dsize = 1u << ATTR_DSIZE(attr);
     uint32_t esize = MAX(ssize, dsize);
-    uint64_t total;
     uint8_t buf[8];
 
     if (citer == 0) {
@@ -110,20 +136,28 @@ static void edma_run_channel(IMX93EdmaState *s, int ch)
         return;
     }
 
-    total = (uint64_t)nbytes * citer;
-
     /*
-     * Transfer element by element so that fixed peripheral addresses (SOFF or
-     * DOFF == 0) are hit with the access width the device register expects,
-     * while the memory side walks linearly.
+     * Run the whole TCD: CITER minor loops, each moving NBYTES element by
+     * element so that fixed peripheral addresses (SOFF or DOFF == 0) are hit
+     * with the access width the device register expects, while the memory side
+     * walks linearly. A minor-loop offset (MLOFF) rewinds the enabled side at
+     * each minor-loop boundary.
      */
-    for (uint64_t done = 0; done + esize <= total; done += esize) {
-        address_space_read(&address_space_memory, saddr,
-                           MEMTXATTRS_UNSPECIFIED, buf, esize);
-        address_space_write(&address_space_memory, daddr,
-                            MEMTXATTRS_UNSPECIFIED, buf, esize);
-        saddr += soff;
-        daddr += doff;
+    for (uint16_t ml = 0; ml < citer; ml++) {
+        for (uint64_t done = 0; done + esize <= nbytes; done += esize) {
+            address_space_read(&address_space_memory, saddr,
+                               MEMTXATTRS_UNSPECIFIED, buf, esize);
+            address_space_write(&address_space_memory, daddr,
+                                MEMTXATTRS_UNSPECIFIED, buf, esize);
+            saddr += soff;
+            daddr += doff;
+        }
+        if (raw_nbytes & NBYTES_SMLOE) {
+            saddr += mloff;
+        }
+        if (raw_nbytes & NBYTES_DMLOE) {
+            daddr += mloff;
+        }
     }
 
     /* Completion: channel done, request disabled, interrupt pending. */
@@ -162,7 +196,9 @@ static void edma_service_minor(IMX93EdmaState *s, int ch)
     int16_t soff = (int16_t)ld16(t + TCD_SOFF);
     int16_t doff = (int16_t)ld16(t + TCD_DOFF);
     uint16_t attr = ld16(t + TCD_ATTR);
-    uint32_t nbytes = ld32(t + TCD_NBYTES) & 0x3fffffff;
+    uint32_t raw_nbytes = ld32(t + TCD_NBYTES);
+    int32_t mloff;
+    uint32_t nbytes = edma_decode_nbytes(raw_nbytes, &mloff);
     uint16_t citer = ld16(t + TCD_CITER) & ITER_MASK;
     uint16_t biter = ld16(t + TCD_BITER) & ITER_MASK;
     uint16_t csr = ld16(t + TCD_CSR);
@@ -187,7 +223,26 @@ static void edma_service_minor(IMX93EdmaState *s, int ch)
         saddr += soff;
         daddr += doff;
     }
+    /*
+     * Apply the minor-loop offset to whichever side enabled it: a peripheral
+     * that walks several data registers per minor loop (MICFIL DATACH0..n) sets
+     * SMLOE with a negative MLOFF to rewind SADDR back to the first register.
+     */
+    if (raw_nbytes & NBYTES_SMLOE) {
+        saddr += mloff;
+    }
+    if (raw_nbytes & NBYTES_DMLOE) {
+        daddr += mloff;
+    }
+    /*
+     * Persist both pointers. The fixed (peripheral) side has off==0 so it is
+     * unchanged; the advancing (memory) side must carry over to the next minor
+     * loop. Saving only SADDR works for transmit (mem->FIFO) but loses the
+     * destination for receive (FIFO->mem), where DADDR is the one that walks
+     * the ring - without this every minor loop overwrites the same bytes.
+     */
     st32(t + TCD_SADDR, (uint32_t)saddr);
+    st32(t + TCD_DADDR, (uint32_t)daddr);
 
     if (citer > 1) {
         citer--;
