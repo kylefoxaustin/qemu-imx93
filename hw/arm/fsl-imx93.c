@@ -958,6 +958,16 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
             sysbus_connect_irq(sbd, 0,
                 qdev_get_gpio_in(gicdev, lpi2c_exp_tbl[i].irq));
         }
+
+        /*
+         * OV5640 MIPI camera sensor (@0x3c) on LPI2C3 (= lpi2c_exp[0]): the
+         * sensor the ov5640 device-tree variant routes through the MIPI CSI-2
+         * host to the ISI. With it the ov5640 driver probes and registers its
+         * V4L2 subdev so the media graph links (mirrors the mt9m114 on LPI2C8).
+         */
+        i2c_slave_realize_and_unref(
+            i2c_slave_new(TYPE_OV5640, 0x3c),
+            s->lpi2c_exp[0].bus, &error_abort);
     }
 
     /*

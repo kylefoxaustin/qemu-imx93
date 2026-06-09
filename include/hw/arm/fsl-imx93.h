@@ -422,6 +422,9 @@ enum FslImx93Irqs {
 /* MT9M114 camera sensor I2C slave (mt9m114 device-tree variant). */
 #define TYPE_MT9M114            "mt9m114"
 
+/* OV5640 MIPI camera sensor I2C slave (ov5640 device-tree variant). */
+#define TYPE_OV5640             "ov5640"
+
 /* I2C addresses on lpi2c2: PMIC + GPIO expander. */
 #define FSL_IMX93_PCA9451_ADDR  0x25
 #define FSL_IMX93_PCA9451_DEVID 0x90    /* DEV_ID high nibble 0x9 = pca9451a */
