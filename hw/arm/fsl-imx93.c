@@ -1104,6 +1104,14 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
             sysbus_connect_irq(SYS_BUS_DEVICE(&s->micfil), i,
                                qdev_get_gpio_in(gicdev, micfil_irqs[i]));
         }
+
+        /*
+         * MICFIL channel-0 capture requests are serviced by eDMA1 (like SAI1):
+         * wire its DMA-request line so the cyclic RX channel drains DATACH0 as
+         * the FIFO fills, pacing PDM capture at the audio word rate.
+         */
+        qdev_connect_gpio_out_named(DEVICE(&s->micfil), "dma-req", 0,
+            qdev_get_gpio_in_named(DEVICE(&s->edma1), "dma-req", 0));
     }
 
     /* All peripherals not yet modeled get logging stubs. */
@@ -1242,6 +1250,13 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
                     fsl_imx93_memmap[FSL_IMX93_XCVR].addr);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->xcvr), 0,
                        qdev_get_gpio_in(gicdev, FSL_IMX93_XCVR_IRQ));
+    /*
+     * The XCVR (SPDIF) shares eDMA2 with SAI3 (both in the 0x4268xxxx region):
+     * wire its TX DMA-request so the cyclic playback channel advances as the
+     * SPDIF TX FIFO drains at the audio word rate.
+     */
+    qdev_connect_gpio_out_named(DEVICE(&s->xcvr), "dma-req", 0,
+        qdev_get_gpio_in_named(DEVICE(&s->edma2), "dma-req", 0));
 
     /* TSTMR1/2 timestamp timers + SEMA42 hardware semaphores (Group A). */
     {
