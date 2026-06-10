@@ -41,9 +41,9 @@
  * control-register window is 0x10/4. Its bits gate the transmit datapath.
  */
 #define XCVR_EXT_CTRL_REL       0x10
-#define EXT_CTRL_TX_DPTH_RESET  (1u << 27)  /* TX datapath in reset       */
-#define EXT_CTRL_DMA_RD_DIS     (1u << 25)  /* DMA read (playback) disable */
-#define EXT_CTRL_SPDIF_MODE     (1u << 23)  /* SPDIF mode selected         */
+#define EXT_CTRL_TX_DPTH_RESET  (1u << 27)  /* TX datapath in reset        */
+#define EXT_CTRL_DMA_WR_DIS     (1u << 24)  /* DMA disable, TX direction    */
+#define EXT_CTRL_SPDIF_MODE     (1u << 23)  /* SPDIF mode selected          */
 #define EXT_CTRL_TX_FWM_MASK    0x7f        /* TX FIFO watermark [6:0]     */
 
 /* SPDIF stereo: 2 ch x 48 kHz = 96000 words/s. */
@@ -55,7 +55,7 @@ static bool xcvr_tx_active(IMX93XcvrState *s)
     uint32_t ec = s->regs[XCVR_EXT_CTRL_REL >> 2];
 
     return (ec & EXT_CTRL_SPDIF_MODE) && !(ec & EXT_CTRL_TX_DPTH_RESET) &&
-           !(ec & EXT_CTRL_DMA_RD_DIS);
+           !(ec & EXT_CTRL_DMA_WR_DIS);
 }
 
 /* Queue clocked-out bytes for the audio backend. */

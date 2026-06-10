@@ -8,8 +8,9 @@
  * Models the XCVR control registers so the fsl_xcvr driver probes and
  * registers its SPDIF card, plus a functional transmit FIFO. The i.MX93 XCVR is
  * SPDIF-only and firmware-free (soc_data has no fw_name/PHY), so once the
- * driver releases the TX datapath (EXT_CTRL.TX_DPTH_RESET clear) with DMA-read
- * enabled, words the eDMA writes to TX_FIFO (0xe00) are clocked out at the
+ * driver releases the TX datapath (EXT_CTRL.TX_DPTH_RESET clear) with the
+ * TX-direction DMA enabled (EXT_CTRL.DMA_WR_DIS clear), words the eDMA writes
+ * to TX_FIFO (0xe00) are clocked out at the
  * audio word rate and a dma-req is pulsed as the FIFO drains past the TX
  * watermark - the same cyclic playback contract the SAI uses. Played samples
  * go to the audio backend.
