@@ -38,6 +38,7 @@ struct IMX93FlexioState {
     uint8_t  i2c_tx_byte;       /* byte loaded into the transmit shifter */
     bool     i2c_tx_pending;    /* a shift of that byte is scheduled */
     uint8_t  i2c_rx_byte;       /* byte presented to SHIFTBUFBIS_1 */
+    bool     i2c_rx_full;       /* rx byte awaiting drain: gates the next shift */
 };
 
 #endif /* IMX93_FLEXIO_H */

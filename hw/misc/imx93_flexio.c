@@ -99,8 +99,19 @@ static void imx93_flexio_i2c_end(IMX93FlexioState *s)
  * and capture the receive byte, then raise both shifter flags together. The
  * first byte of a transfer is the addressing byte (i2c_start_transfer); later
  * bytes are sent, or a dummy clock receives. Doing the bus operation and the
- * flag update atomically here - between the driver's interrupt handlers - is
- * what keeps the transmit/receive handshake in lock-step.
+ * flag update here - on the timer, between the driver's interrupt handlers -
+ * is what keeps the transmit/receive handshake in lock-step.
+ *
+ * The shift is gated on the previous receive byte having been drained. The
+ * driver's handler samples SHIFTSTAT once, then loads the next transmit byte
+ * and reads SHIFTBUFBIS_1 for the current one; a busy host can let this timer
+ * fire between those two accesses. Clocking the next byte then would overwrite
+ * the still-unread receive byte and, because the receive flag is already set,
+ * swallow its interrupt edge - the race that stalls the driver. So if the
+ * receive byte has not been drained yet, defer: re-arm and retry once it is.
+ * The shift never runs ahead of the driver, and (unlike doing it synchronously
+ * from the register handler) it still lands between handler invocations, so the
+ * level-triggered interrupt keeps its clean low gap and cannot storm.
  */
 static void imx93_flexio_shift(void *opaque)
 {
@@ -109,6 +120,11 @@ static void imx93_flexio_shift(void *opaque)
     bool ack;
 
     if (!s->i2c_tx_pending) {
+        return;
+    }
+    if (s->i2c_rx_full) {
+        timer_mod(s->shift_timer,
+                  qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + FLEXIO_SHIFT_NS);
         return;
     }
     s->i2c_tx_pending = false;
@@ -143,6 +159,7 @@ static void imx93_flexio_shift(void *opaque)
         }
     }
 
+    s->i2c_rx_full = true;
     R(s, FLEXIO_SHIFTSTAT) |= SHIFTSTAT_TX | SHIFTSTAT_RX;
     if (ack) {
         R(s, FLEXIO_SHIFTERR) &= ~(uint32_t)SHIFTERR_RX_NAK;
@@ -185,6 +202,7 @@ static uint64_t imx93_flexio_read(void *opaque, hwaddr offset, unsigned size)
         break;
     case FLEXIO_SHIFTBUFBIS_1:
         val = s->i2c_rx_byte;
+        s->i2c_rx_full = false;     /* drained: a deferred shift may now run */
         R(s, FLEXIO_SHIFTSTAT) &= ~(uint32_t)SHIFTSTAT_RX;   /* read clears */
         imx93_flexio_update_irq(s);
         break;
@@ -214,6 +232,7 @@ static void imx93_flexio_write(void *opaque, hwaddr offset, uint64_t value,
             timer_del(s->shift_timer);
             memset(s->regs, 0, sizeof(s->regs));
             s->i2c_tx_pending = false;
+            s->i2c_rx_full = false;
             /* Reset leaves the transmit shifter empty (the driver polls it). */
             R(s, FLEXIO_SHIFTSTAT) = SHIFTSTAT_TX;
             value &= ~(uint64_t)FLEXIO_CTRL_SWRST;
@@ -233,6 +252,7 @@ static void imx93_flexio_write(void *opaque, hwaddr offset, uint64_t value,
             /* Driver disarmed interrupts: the transfer is complete. */
             imx93_flexio_i2c_end(s);
             s->i2c_tx_pending = false;
+            s->i2c_rx_full = false;
             timer_del(s->shift_timer);
             R(s, FLEXIO_SHIFTSTAT) = SHIFTSTAT_TX;   /* shifter idle/empty */
             R(s, FLEXIO_TIMSTAT) |= 0x1;     /* transfer-done poll succeeds */
@@ -244,6 +264,7 @@ static void imx93_flexio_write(void *opaque, hwaddr offset, uint64_t value,
              */
             imx93_flexio_i2c_end(s);
             s->i2c_tx_pending = false;
+            s->i2c_rx_full = false;
             R(s, FLEXIO_SHIFTSTAT) = SHIFTSTAT_TX;
         }
         imx93_flexio_update_irq(s);
@@ -277,6 +298,7 @@ static void imx93_flexio_reset(DeviceState *dev)
     timer_del(s->shift_timer);
     memset(s->regs, 0, sizeof(s->regs));
     s->i2c_tx_pending = false;
+    s->i2c_rx_full = false;
     /* Transmit shifter starts empty so the driver's idle poll succeeds. */
     R(s, FLEXIO_SHIFTSTAT) = SHIFTSTAT_TX;
     qemu_set_irq(s->irq, 0);
@@ -304,8 +326,8 @@ static void imx93_flexio_realize(DeviceState *dev, Error **errp)
 
 static const VMStateDescription vmstate_imx93_flexio = {
     .name = TYPE_IMX93_FLEXIO,
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, IMX93FlexioState, IMX93_FLEXIO_NUM_REGS),
         VMSTATE_BOOL(i2c_started, IMX93FlexioState),
@@ -314,6 +336,7 @@ static const VMStateDescription vmstate_imx93_flexio = {
         VMSTATE_UINT8(i2c_tx_byte, IMX93FlexioState),
         VMSTATE_BOOL(i2c_tx_pending, IMX93FlexioState),
         VMSTATE_UINT8(i2c_rx_byte, IMX93FlexioState),
+        VMSTATE_BOOL(i2c_rx_full, IMX93FlexioState),
         VMSTATE_END_OF_LIST()
     },
 };

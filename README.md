@@ -136,7 +136,11 @@ enumerates — the registration bar, no working host data path yet).
 - **FlexIO I²C — functional.** Booting the `…-flexio-i2c` DTB, the FlexIO
   shifter/timer fabric is driven as an extra I²C master (`nxp,imx-flexio` +
   `i2c-flexio`) → `/dev/i2c-8`. The model clocks the I²C handshake against a real
-  QEMU I²C bus, so `-device tmp105,bus=flexio1-i2c,…` round-trips read/write.
+  QEMU I²C bus, so `-device tmp105,bus=flexio1-i2c,…` round-trips read/write. The
+  shift is paced on a virtual-time timer (the driver busy-polls the shifter
+  status) and gated on the prior receive byte being drained, so the
+  level-triggered interrupt keeps a clean low gap and cannot storm — validated
+  at 5000 back-to-back round-trips with zero stalls.
 - **GPIO + ELE — functional.** GPIO controllers; **ELE** (EdgeLock Enclave) s4
   MU + responder, so the OCOTP MAC nvmem cells resolve.
 - **eDMA3 — functional.** (`hw/dma/imx93_edma.c`) real TCD execution (drives the
