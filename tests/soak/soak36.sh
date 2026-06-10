@@ -4,11 +4,19 @@
 # machine. Runs detached (setsid) so it outlives the launching shell/session.
 #
 # It loops in ~2h cycles until a persisted deadline. Each cycle:
-#   MAIN  block  (imx93-11x11-evk.dtb)         - the endurance core: audio driven
-#                CONTINUOUSLY (back-to-back /pcm_play, no gap) alongside i2c +
-#                storage + network loops, for MAIN_BLOCK seconds.
-#   CAMERA block (imx93-11x11-evk-mt9m114.dtb) - repeated V4L2 capture.
-#   FLEXIO block (imx93-11x11-evk-flexio-i2c)  - repeated tmp105 I2C round-trip.
+#   MAIN   block (imx93-11x11-evk.dtb)         - the endurance core: the WHOLE
+#                audio surface driven CONTINUOUSLY, back-to-back, no gap -
+#                wm8962/SAI3 playback AND capture (SAI-RX), XCVR/SPDIF playback,
+#                and MICFIL PDM capture, all at once (every eDMA channel busy) -
+#                alongside i2c + storage + network loops, for MAIN_BLOCK seconds.
+#   CAMERA block (imx93-11x11-evk-mt9m114.dtb) - repeated V4L2 capture (parallel
+#                CSI path: mt9m114 -> pcsi -> ISI).
+#   MIPICAM block(imx93-11x11-frdm-ov5640.dtb) - repeated V4L2 capture (MIPI
+#                CSI-2 path: ov5640 -> dw-mipi-csi2 -> ISI).
+#   DISPLAY block(imx93-11x11-evk-rm67199.dtb) - LCDIFv3 -> DSI -> rm67199 panel
+#                scanout: fill /dev/fb0 and let the page-flip loop DMA it out.
+#   FLEXIO block (imx93-11x11-evk-flexio-i2c)  - repeated tmp105 I2C round-trip
+#                (also exercises the FlexIO defer-shift anti-storm fix).
 #
 # Resilience: a guest oops/panic or an early QEMU exit does NOT abort the soak.
 # The block's serial log is copied to incidents/, a counter is bumped, and the
@@ -21,7 +29,8 @@
 # watcher can tell "running" from "stuck".
 #
 # Env: TOTAL (s, default 129600=36h), MAIN_BLOCK (6600), CAM_BLOCK (300),
-#      FLEXIO_BLOCK (300), MONSAMPLE (30). Paths as in soak-full.sh.
+#      MIPI_BLOCK (300), DISP_BLOCK (300), FLEXIO_BLOCK (300), MONSAMPLE (30).
+#      Paths as in soak-full.sh.
 set -u
 
 REPO=${REPO:-/home/kyle/Documents/GitHub/93emulator}
@@ -30,15 +39,20 @@ QEMU=${QEMU:-$REPO/build-imx93/qemu-system-aarch64}
 KERNEL=${KERNEL:-$DEPLOY/Image}
 DTB_MAIN=${DTB_MAIN:-$DEPLOY/imx93-11x11-evk.dtb}
 DTB_CAM=${DTB_CAM:-$DEPLOY/imx93-11x11-evk-mt9m114.dtb}
+DTB_MIPI=${DTB_MIPI:-$DEPLOY/imx93-11x11-frdm-ov5640.dtb}
+DTB_DISP=${DTB_DISP:-$DEPLOY/imx93-11x11-evk-rm67199.dtb}
 DTB_FLEXIO=${DTB_FLEXIO:-$DEPLOY/imx93-11x11-evk-flexio-i2c.dtb}
 BASE_INITRD=${BASE_INITRD:-$HOME/Documents/nxp/imx93-initramfs.cpio.gz}
 PCM_PLAY=${PCM_PLAY:-/tmp/pcm_play}
+PCM_CAP=${PCM_CAP:-/tmp/pcm_capture}
 V4L2_CAP=${V4L2_CAP:-/tmp/v4l2_cap}
 
 WORK=${WORK:-/tmp/soak36}
 TOTAL=${TOTAL:-129600}        # 36 hours
 MAIN_BLOCK=${MAIN_BLOCK:-6600}
 CAM_BLOCK=${CAM_BLOCK:-300}
+MIPI_BLOCK=${MIPI_BLOCK:-300}
+DISP_BLOCK=${DISP_BLOCK:-300}
 FLEXIO_BLOCK=${FLEXIO_BLOCK:-300}
 MONSAMPLE=${MONSAMPLE:-30}
 
@@ -80,7 +94,9 @@ fi
 load() { [ -f "$WORK/$1" ] && cat "$WORK/$1" || echo 0; }
 CYCLES=$(load c_cycles); BOOTS=$(load c_boots); INC=$(load c_incidents)
 AUD=$(load c_audio); I2C=$(load c_i2c); STOR=$(load c_storage); NET=$(load c_net)
-CAP=$(load c_captures); RT=$(load c_roundtrips); RSSPK=$(load c_rsspeak)
+RX=$(load c_sairx); SPD=$(load c_spdif); MIC=$(load c_micfil)
+CAP=$(load c_captures); MIPI=$(load c_mipicap); FLIP=$(load c_flips)
+RT=$(load c_roundtrips); RSSPK=$(load c_rsspeak)
 save() { echo "$2" > "$WORK/$1"; }
 
 write_status() {
@@ -94,10 +110,15 @@ cycles=$CYCLES
 boots=$BOOTS
 incidents=$INC
 audio_plays=$AUD
+sai_rx_captures=$RX
+spdif_plays=$SPD
+micfil_captures=$MIC
 i2c_reads=$I2C
 storage_ops=$STOR
 net_pings=$NET
 captures=$CAP
+mipi_captures=$MIPI
+panel_flips=$FLIP
 roundtrips=$RT
 rss_peak_kb=$RSSPK
 EOF
@@ -122,18 +143,49 @@ mount -t sysfs sysfs /sys 2>/dev/null
 mount -t devtmpfs devtmpfs /dev 2>/dev/null
 mkdir -p /tmp /mnt/sd
 sleep 3
+# Full audio surface: SAI/wm8962 (snd-soc-wm8962 + fsl-asoc-card), XCVR/SPDIF
+# (snd-soc-fsl-xcvr + imx-card), MICFIL PDM (snd-soc-fsl-micfil + imx-card +
+# the dmic codec).
 for m in snd-soc-fsl-utils snd-soc-fsl-sai imx-pcm-dma \
          snd-soc-wm8962 snd-soc-fsl-asoc-card \
+         snd-soc-fsl-micfil snd-soc-fsl-xcvr snd-soc-imx-card snd-soc-dmic \
          snd-soc-simple-card snd-soc-simple-card-utils; do
     modprobe "$m" 2>&1 | sed "s/^/  modprobe $m: /"
 done
-sleep 3
+sleep 4
 cat /proc/asound/cards 2>/dev/null
-echo 0 > /tmp/acount; echo 0 > /tmp/icount; echo 0 > /tmp/scount; echo 0 > /tmp/ncount
-# A) audio - CONTINUOUS, back-to-back, no gap.
-( ac=0; while true; do
-      if /pcm_play hw:1,0 1 >/tmp/aud.last 2>&1; then ac=$((ac + 1)); fi
-      echo "$ac" > /tmp/acount
+# Resolve card numbers by id (don't hardcode - enumeration order can shift).
+card_of() { for c in 0 1 2 3 4 5; do [ -e /proc/asound/card$c/id ] || continue
+    case "$(cat /proc/asound/card$c/id)" in *$1*) echo "$c"; return;; esac; done; }
+WM=$(card_of wm8962); XC=$(card_of xcvr); MF=$(card_of micfil)
+echo "AUDIO CARDS wm8962=$WM xcvr=$XC micfil=$MF"
+echo 0 > /tmp/acount; echo 0 > /tmp/rxcount; echo 0 > /tmp/spcount; echo 0 > /tmp/mfcount
+echo 0 > /tmp/icount; echo 0 > /tmp/scount; echo 0 > /tmp/ncount
+# Audio datapath note: SAI3 and XCVR share eDMA2's single dma-req line, and the
+# model advances the first cyclic channel per request pulse - so one eDMA2
+# stream gets full service and any second eDMA2 stream is starved (a known eDMA
+# model limitation; see the soak README). MICFIL is on eDMA1 (independent). So
+# we run exactly ONE eDMA2 audio stream at a time at full bandwidth, ROTATING
+# SAI3 playback -> SAI3 capture (SAI-RX) -> XCVR/SPDIF playback, while MICFIL
+# PDM capture runs CONTINUOUSLY on eDMA1 throughout. Audio never stops (one
+# eDMA2 path + MICFIL are always live) and every datapath is hammered in turn.
+AUDIO_OPS=20   # back-to-back ops per eDMA2 phase before rotating (~2-3s each)
+inc() { echo $(( $(cat "$1") + 1 )) > "$1"; }
+# MICFIL PDM capture - CONTINUOUS (eDMA1, independent of the eDMA2 rotation).
+[ -n "$MF" ] && ( while true; do
+      /pcm_capture plughw:$MF,0 1 >/tmp/micfil.last 2>&1 && inc /tmp/mfcount
+  done ) &
+# Rotating single eDMA2 stream: SAI-TX play -> SAI-RX capture -> XCVR/SPDIF.
+( while true; do
+      i=0; while [ $i -lt $AUDIO_OPS ]; do
+          [ -n "$WM" ] && /pcm_play hw:$WM,0 1 >/tmp/aud.last 2>&1 && inc /tmp/acount
+          i=$((i + 1)); done
+      i=0; while [ $i -lt $AUDIO_OPS ]; do
+          [ -n "$WM" ] && /pcm_capture hw:$WM,0 1 >/tmp/rx.last 2>&1 && inc /tmp/rxcount
+          i=$((i + 1)); done
+      i=0; while [ $i -lt $AUDIO_OPS ]; do
+          [ -n "$XC" ] && /pcm_play plughw:$XC,0 1 >/tmp/spdif.last 2>&1 && inc /tmp/spcount
+          i=$((i + 1)); done
   done ) &
 # B) i2c - hammer LPI2C1 reading the wm8962 id register (single transfer, no scan).
 ( ic=0; while true; do
@@ -160,7 +212,7 @@ while true; do
     n=$((n + 1))
     mf=$(awk '/MemFree/{print $2}' /proc/meminfo 2>/dev/null)
     il=$(grep -c . /proc/interrupts 2>/dev/null)
-    echo "SOAK ITER $n memfree=${mf}kB irqlines=$il audio=$(cat /tmp/acount) i2c=$(cat /tmp/icount) storage=$(cat /tmp/scount) net=$(cat /tmp/ncount)"
+    echo "SOAK ITER $n memfree=${mf}kB irqlines=$il audio=$(cat /tmp/acount) sairx=$(cat /tmp/rxcount) spdif=$(cat /tmp/spcount) micfil=$(cat /tmp/mfcount) i2c=$(cat /tmp/icount) storage=$(cat /tmp/scount) net=$(cat /tmp/ncount)"
     sleep 5
 done
 EOF
@@ -215,6 +267,70 @@ while true; do
     sleep 5
 done
 EOF
+
+cat > "$WORK/mipicam.init" <<'EOF'
+#!/bin/sh
+# MIPI CSI-2 capture: ov5640 -> dw-mipi-csi2 host -> ISI -> /dev/video0.
+# ov5640 is a module (unlike the built-in mt9m114), so modprobe it first.
+PATH=/sbin:/usr/sbin:/bin:/usr/bin; export PATH
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sysfs /sys 2>/dev/null
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /tmp
+sleep 3
+modprobe ov5640 2>&1 | sed "s/^/  modprobe ov5640: /"
+sleep 2
+ls -l /dev/video* /dev/media* 2>/dev/null
+echo 0 > /tmp/mcount; echo 0 > /tmp/mfail
+( mc=0; mf=0; while true; do
+      if /v4l2_cap cap /dev/video0 >/tmp/mipi.last 2>&1; then mc=$((mc + 1)); else mf=$((mf + 1)); fi
+      echo "$mc" > /tmp/mcount; echo "$mf" > /tmp/mfail
+  done ) &
+n=0
+while true; do
+    n=$((n + 1))
+    mf=$(awk '/MemFree/{print $2}' /proc/meminfo 2>/dev/null)
+    il=$(grep -c . /proc/interrupts 2>/dev/null)
+    echo "SOAK ITER $n memfree=${mf}kB irqlines=$il mipicap=$(cat /tmp/mcount) mipifail=$(cat /tmp/mfail)"
+    sleep 5
+done
+EOF
+
+cat > "$WORK/disp.init" <<'EOF'
+#!/bin/sh
+# DSI panel scanout: LCDIFv3 CRTC -> dw-mipi-dsi -> rm67199 panel. imx-drm
+# creates /dev/fb0 at the panel's native res; fill it repeatedly and let the
+# LCDIF page-flip loop DMA the framebuffer out through the DSI link.
+PATH=/sbin:/usr/sbin:/bin:/usr/bin; export PATH
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sysfs /sys 2>/dev/null
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /tmp
+sleep 5
+if [ -e /dev/fb0 ]; then
+    echo "FB0 virtual_size=$(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null)"
+else
+    echo "NO FB0"
+fi
+echo 0 > /tmp/flipcount; echo 0 > /tmp/flipfail
+sz=$(awk '/MemTotal/{print 8294400}' /proc/meminfo)  # 1080*1920*4
+( fc=0; ff=0; p=0; while true; do
+      # alternate fill patterns so the scanned-out content actually changes
+      pat=$(printf '\%o' $(( (p % 2) * 85 + 42 )))   # 0x2a / 0x7f-ish
+      if yes "$pat" 2>/dev/null | head -c 8294400 | dd of=/dev/fb0 bs=64k 2>/dev/null; then
+          fc=$((fc + 1)); else ff=$((ff + 1)); fi
+      echo "$fc" > /tmp/flipcount; echo "$ff" > /tmp/flipfail
+      p=$((p + 1)); sleep 1
+  done ) &
+n=0
+while true; do
+    n=$((n + 1))
+    mf=$(awk '/MemFree/{print $2}' /proc/meminfo 2>/dev/null)
+    il=$(grep -c . /proc/interrupts 2>/dev/null)
+    echo "SOAK ITER $n memfree=${mf}kB irqlines=$il flips=$(cat /tmp/flipcount) flipfail=$(cat /tmp/flipfail)"
+    sleep 5
+done
+EOF
 chmod +x "$WORK"/*.init
 }
 
@@ -262,11 +378,16 @@ run_block() {
     case "$name" in
         MAIN)
             AUD=$((AUD + $(maxtok audio "$log")));     save c_audio "$AUD"
+            RX=$((RX + $(maxtok sairx "$log")));       save c_sairx "$RX"
+            SPD=$((SPD + $(maxtok spdif "$log")));     save c_spdif "$SPD"
+            MIC=$((MIC + $(maxtok micfil "$log")));    save c_micfil "$MIC"
             I2C=$((I2C + $(maxtok i2c "$log")));       save c_i2c "$I2C"
             STOR=$((STOR + $(maxtok storage "$log"))); save c_storage "$STOR"
             NET=$((NET + $(maxtok net "$log")));       save c_net "$NET" ;;
-        CAMERA) CAP=$((CAP + $(maxtok captures "$log")));   save c_captures "$CAP" ;;
-        FLEXIO) RT=$((RT + $(maxtok roundtrips "$log")));   save c_roundtrips "$RT" ;;
+        CAMERA)  CAP=$((CAP + $(maxtok captures "$log")));    save c_captures "$CAP" ;;
+        MIPICAM) MIPI=$((MIPI + $(maxtok mipicap "$log")));   save c_mipicap "$MIPI" ;;
+        DISPLAY) FLIP=$((FLIP + $(maxtok flips "$log")));     save c_flips "$FLIP" ;;
+        FLEXIO)  RT=$((RT + $(maxtok roundtrips "$log")));    save c_roundtrips "$RT" ;;
     esac
 
     if [ "$faulted" -eq 1 ]; then
@@ -277,13 +398,14 @@ run_block() {
         write_status incident "$name"
         return 1
     fi
-    say "BLOCK $name ok (audio+=$(maxtok audio "$log") i2c+=$(maxtok i2c "$log") stor+=$(maxtok storage "$log") net+=$(maxtok net "$log") cap+=$(maxtok captures "$log") rt+=$(maxtok roundtrips "$log"))"
+    say "BLOCK $name ok (audio+=$(maxtok audio "$log") sairx+=$(maxtok sairx "$log") spdif+=$(maxtok spdif "$log") micfil+=$(maxtok micfil "$log") i2c+=$(maxtok i2c "$log") stor+=$(maxtok storage "$log") net+=$(maxtok net "$log") cap+=$(maxtok captures "$log") mipi+=$(maxtok mipicap "$log") flips+=$(maxtok flips "$log") rt+=$(maxtok roundtrips "$log"))"
     write_status running "$name"
     return 0
 }
 
 # ----- setup ------------------------------------------------------------------
-for f in "$QEMU" "$KERNEL" "$DTB_MAIN" "$DTB_CAM" "$DTB_FLEXIO" "$BASE_INITRD" "$PCM_PLAY" "$V4L2_CAP"; do
+for f in "$QEMU" "$KERNEL" "$DTB_MAIN" "$DTB_CAM" "$DTB_MIPI" "$DTB_DISP" \
+         "$DTB_FLEXIO" "$BASE_INITRD" "$PCM_PLAY" "$PCM_CAP" "$V4L2_CAP"; do
     [ -e "$f" ] || { say "FATAL: missing $f"; exit 2; }
 done
 # persistent SD backing image
@@ -295,9 +417,11 @@ fi
 
 gen_inits
 say "building per-phase initramfs images..."
-mk_initrd "$WORK/main.init"   "$WORK/main.cpio.gz"   "$PCM_PLAY"
-mk_initrd "$WORK/cam.init"    "$WORK/cam.cpio.gz"    "$V4L2_CAP"
-mk_initrd "$WORK/flexio.init" "$WORK/flexio.cpio.gz"
+mk_initrd "$WORK/main.init"    "$WORK/main.cpio.gz"    "$PCM_PLAY" "$PCM_CAP"
+mk_initrd "$WORK/cam.init"     "$WORK/cam.cpio.gz"     "$V4L2_CAP"
+mk_initrd "$WORK/mipicam.init" "$WORK/mipicam.cpio.gz" "$V4L2_CAP"
+mk_initrd "$WORK/disp.init"    "$WORK/disp.cpio.gz"
+mk_initrd "$WORK/flexio.init"  "$WORK/flexio.cpio.gz"
 say "initramfs ready; entering cycle loop"
 
 # ----- the 36h cycle loop -----------------------------------------------------
@@ -323,6 +447,12 @@ while [ "$(remaining)" -gt 60 ]; do
     d=$(cap_dur "$CAM_BLOCK")
     [ "$d" -gt 30 ] && { run_block CAMERA "$DTB_CAM" "$WORK/cam.cpio.gz" "$d" || true; }
 
+    d=$(cap_dur "$MIPI_BLOCK")
+    [ "$d" -gt 30 ] && { run_block MIPICAM "$DTB_MIPI" "$WORK/mipicam.cpio.gz" "$d" || true; }
+
+    d=$(cap_dur "$DISP_BLOCK")
+    [ "$d" -gt 30 ] && { run_block DISPLAY "$DTB_DISP" "$WORK/disp.cpio.gz" "$d" || true; }
+
     d=$(cap_dur "$FLEXIO_BLOCK")
     [ "$d" -gt 30 ] && { run_block FLEXIO "$DTB_FLEXIO" "$WORK/flexio.cpio.gz" "$d" \
         -device tmp105,bus=flexio1-i2c,address=0x49 || true; }
@@ -332,7 +462,8 @@ done
 write_status done none
 say "================ SOAK36 COMPLETE ================"
 say "cycles=$CYCLES boots=$BOOTS incidents=$INC"
-say "audio_plays=$AUD i2c_reads=$I2C storage_ops=$STOR net_pings=$NET captures=$CAP roundtrips=$RT"
+say "audio_plays=$AUD sai_rx=$RX spdif=$SPD micfil=$MIC i2c=$I2C storage=$STOR net=$NET"
+say "captures=$CAP mipi_captures=$MIPI panel_flips=$FLIP roundtrips=$RT"
 say "peak QEMU RSS=${RSSPK}kB"
 if [ "$INC" -eq 0 ]; then say "RESULT: PASS (no faults over the full duration)"
 else say "RESULT: COMPLETED WITH $INC INCIDENT(S) - see $WORK/incidents/"; fi
