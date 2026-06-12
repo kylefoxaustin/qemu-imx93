@@ -132,7 +132,9 @@ enumerates — the registration bar, no working host data path yet).
   PCAL6524 I/O expander; regulators register and unblock uSDHC. **All 8 LPI2C
   controllers** are real (was 3) and each I²C bus is named, so peripherals attach
   at runtime — `-device tmp105,bus=lpi2c5,address=0x49` is read/written from
-  Linux byte-exact. (LPSPI1–8 expose SSI buses the same way.)
+  Linux byte-exact. **LPSPI1–8** expose named SSI buses the same way — attach an
+  SSI slave with `-device <flash>,bus=lpspi1`; an is25lp064 SPI NOR answers a
+  JEDEC-ID read (`0x9d 0x60 0x17`) byte-exact through the controller.
 - **I3C — functional.** I3C1 is a real Silvaco (`silvaco,i3c-master-v1`)
   controller (`hw/i3c/svc_i3c.c`). Booting the `…-i3c` DTB, which moves the
   wm8962 codec onto the I3C bus as a legacy-I²C target, the controller's I3C

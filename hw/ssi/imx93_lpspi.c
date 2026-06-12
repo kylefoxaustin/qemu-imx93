@@ -18,6 +18,7 @@
 #include "qemu/osdep.h"
 #include "hw/ssi/imx93_lpspi.h"
 #include "hw/core/irq.h"
+#include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "qemu/module.h"
 
@@ -189,7 +190,7 @@ static void lpspi_realize(DeviceState *dev, Error **errp)
 {
     IMX93LpspiState *s = IMX93_LPSPI(dev);
 
-    s->bus = ssi_create_bus(dev, "spi");
+    s->bus = ssi_create_bus(dev, s->bus_name ? s->bus_name : "spi");
     fifo32_create(&s->rx, LPSPI_FIFO_DEPTH);
     memory_region_init_io(&s->iomem, OBJECT(dev), &lpspi_ops, s,
                           TYPE_IMX93_LPSPI, IMX93_LPSPI_SIZE);
@@ -212,6 +213,10 @@ static const VMStateDescription vmstate_lpspi = {
     },
 };
 
+static const Property lpspi_properties[] = {
+    DEFINE_PROP_STRING("bus-name", IMX93LpspiState, bus_name),
+};
+
 static void lpspi_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -219,6 +224,7 @@ static void lpspi_class_init(ObjectClass *klass, const void *data)
     dc->realize = lpspi_realize;
     dc->vmsd = &vmstate_lpspi;
     device_class_set_legacy_reset(dc, lpspi_reset);
+    device_class_set_props(dc, lpspi_properties);
     dc->desc = "i.MX93 LPSPI master";
 }
 

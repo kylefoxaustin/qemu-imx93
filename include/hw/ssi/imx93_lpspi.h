@@ -25,6 +25,7 @@ struct IMX93LpspiState {
     MemoryRegion iomem;
     qemu_irq irq;
     SSIBus *bus;
+    char *bus_name;     /* optional unique SSI bus name for -device bus= */
 
     uint32_t cr;        /* control (enable/reset) */
     uint32_t sr;        /* status (latched TCF/FCF bits) */
