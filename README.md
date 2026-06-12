@@ -404,7 +404,9 @@ behaviour.
 | `tests/gstreamer-imx93/run.sh` | GStreamer software media pipeline → waylandsink → display (no HW codec) |
 | `tests/audio-imx93/run.sh`  | SAI3/WM8962 PCM playback (cyclic eDMA → FIFO; `WAV=` captures a .wav) |
 | `tests/camera-imx93/run.sh` | V4L2 camera capture (MT9M114 → CSI → ISI → real frames on `/dev/video0`) |
+| `tests/camera-imx93/csi-inject-test.sh` | virtual camera: feed host images via the ISI `frames=` source, byte-exact out of `/dev/video0` |
 | `tests/flexio-imx93/run.sh` | FlexIO-as-I²C round-trip (tmp105 read/write over `/dev/i2c-8`) |
+| `tests/i3c-imx93/run.sh`    | I3C master: wm8962 codec probes over the Silvaco I3C bus (legacy-I²C target) |
 | `tests/npu-imx93/run.sh`    | Ethos-U65 driver bind check (no firmware) |
 | `tests/ethosu-rpmsg/run.sh` | Ethos-U65: Linux boots the M33 on demand, channel up |
 | `tests/ethosu-caps/run.sh`  | Ethos-U65: A55→M33→NPU capabilities round-trip (fork demo) |
