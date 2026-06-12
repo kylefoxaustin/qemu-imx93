@@ -16,15 +16,24 @@
  * DQBUF) gets real frames. Set ISI_DBG to trace register accesses; the exact
  * register/bit layout was captured from the live driver (see
  * tests/camera-imx93).
+ *
+ * Virtual camera: the "frames" property points the ISI at a host path (a
+ * directory of *.raw frames or a file of back-to-back raw frames) to feed real
+ * images through the capture pipeline instead of the test pattern - frames are
+ * read straight from the host at each tick and scanned out, cycling/looping.
+ * See tests/camera-imx93/README.md.
  */
 
 #include "qemu/osdep.h"
 #include "hw/display/imx93_isi.h"
 #include "hw/core/irq.h"
+#include "hw/core/qdev-properties.h"
 #include "system/address-spaces.h"
 #include "system/dma.h"
 #include "qemu/timer.h"
+#include "qapi/error.h"
 #include "migration/vmstate.h"
+#include <glob.h>
 
 /*
  * imx8-isi channel-0 register map (per the mainline fsl,imx93-isi driver,
@@ -66,6 +75,94 @@ static void imx93_isi_update_irq(IMX93IsiState *s)
     qemu_set_irq(s->irq, pending ? 1 : 0);
 }
 
+static int imx93_isi_pathcmp(const void *a, const void *b)
+{
+    return strcmp(*(const char * const *)a, *(const char * const *)b);
+}
+
+/*
+ * Host frame source. The "frames" property points at either a single file of
+ * back-to-back raw frames or a directory of *.raw frames; open it and, for a
+ * directory, build a sorted list. Returns true if a source is configured.
+ */
+static bool imx93_isi_frames_open(IMX93IsiState *s, Error **errp)
+{
+    struct stat st;
+
+    if (!s->frames_path) {
+        return false;
+    }
+    if (stat(s->frames_path, &st) != 0) {
+        error_setg_errno(errp, errno, "ISI: cannot stat frames path '%s'",
+                         s->frames_path);
+        return false;
+    }
+    if (S_ISDIR(st.st_mode)) {
+        g_autofree char *pat = g_strdup_printf("%s/*.raw", s->frames_path);
+        glob_t gl;
+
+        if (glob(pat, GLOB_NOSORT, NULL, &gl) != 0 || gl.gl_pathc == 0) {
+            globfree(&gl);
+            error_setg(errp, "ISI: no *.raw frames in directory '%s'",
+                       s->frames_path);
+            return false;
+        }
+        s->n_frame_files = gl.gl_pathc;
+        s->frame_files = g_new0(char *, s->n_frame_files);
+        for (int i = 0; i < s->n_frame_files; i++) {
+            s->frame_files[i] = g_strdup(gl.gl_pathv[i]);
+        }
+        globfree(&gl);
+        /* sort so frame order is deterministic (frame000.raw, frame001.raw…) */
+        qsort(s->frame_files, s->n_frame_files, sizeof(char *),
+              imx93_isi_pathcmp);
+    } else {
+        s->frame_fp = fopen(s->frames_path, "rb");
+        if (!s->frame_fp) {
+            error_setg_errno(errp, errno, "ISI: cannot open frames file '%s'",
+                             s->frames_path);
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Read the next frame (fsz bytes) from the host source into frame_buf, cycling
+ * through the sequence and looping at the end. Returns true on success.
+ */
+static bool imx93_isi_next_frame(IMX93IsiState *s, size_t fsz)
+{
+    if (s->frame_buf_size != fsz) {
+        s->frame_buf = g_realloc(s->frame_buf, fsz);
+        s->frame_buf_size = fsz;
+    }
+
+    if (s->n_frame_files > 0) {                 /* directory of frame files */
+        const char *path = s->frame_files[s->frame_index];
+        gsize len = 0;
+        g_autofree char *data = NULL;
+
+        s->frame_index = (s->frame_index + 1) % s->n_frame_files;
+        if (!g_file_get_contents(path, &data, &len, NULL) || len < fsz) {
+            return false;
+        }
+        memcpy(s->frame_buf, data, fsz);
+        return true;
+    }
+
+    if (s->frame_fp) {                          /* single multi-frame file */
+        size_t got = fread(s->frame_buf, 1, fsz, s->frame_fp);
+
+        if (got < fsz) {                        /* short read: loop to start */
+            rewind(s->frame_fp);
+            got += fread(s->frame_buf + got, 1, fsz - got, s->frame_fp);
+        }
+        return got == fsz;
+    }
+    return false;
+}
+
 /*
  * Generate one moving test-pattern frame into the ping-pong output buffer the
  * hardware would be filling, then raise the frame-stored interrupt.
@@ -86,6 +183,8 @@ static void imx93_isi_frame_tick(void *opaque)
     uint32_t width = cfg & CHNL_IMG_CFG_W_MASK;
     uint32_t height = (cfg >> CHNL_IMG_CFG_H_SHIFT) & CHNL_IMG_CFG_H_MASK;
     uint32_t pitch = R(s, CHNL_OUT_BUF_PITCH) & CHNL_OUT_BUF_PITCH_MASK;
+    bool host_src = s->frames_path != NULL;
+    bool have_host_frame = false;
     bool buf2 = s->frame & 1;
     uint64_t buf = buf2 ? R(s, CHNL_OUT_BUF2_ADDR_Y)
                         : R(s, CHNL_OUT_BUF1_ADDR_Y);
@@ -95,15 +194,33 @@ static void imx93_isi_frame_tick(void *opaque)
     if (!(R(s, CHNL_CTRL) & CHNL_CTRL_CHNL_EN)) {
         return;
     }
+
+    /*
+     * With a host frame source, read the next frame from the file/directory and
+     * scan it out instead of the synthetic moving test pattern. The frame is
+     * raw, packed width*height*bpp in the negotiated output format. With no
+     * source configured, fall back to the gradient (unchanged default).
+     */
+    if (host_src && width && height && pitch) {
+        bpp = pitch / width ? pitch / width : 4;
+        have_host_frame = imx93_isi_next_frame(s, (size_t)width * height * bpp);
+    }
+
     if (buf && width && height && pitch) {
         bpp = pitch / width ? pitch / width : 4;
         line = g_malloc((size_t)width * bpp);
         for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x++) {
-                /* moving diagonal gradient so consecutive frames differ */
-                uint32_t v = (x + y + s->frame * 4) & 0xff;
-                uint32_t px = 0xff000000u | (v << 16) | (v << 8) | v;
-                memcpy(line + (size_t)x * bpp, &px, bpp < 4 ? bpp : 4);
+            if (have_host_frame) {
+                /* packed source row from the host-supplied frame */
+                memcpy(line, s->frame_buf + (size_t)y * width * bpp,
+                       (size_t)width * bpp);
+            } else {
+                for (x = 0; x < width; x++) {
+                    /* moving diagonal gradient so consecutive frames differ */
+                    uint32_t v = (x + y + s->frame * 4) & 0xff;
+                    uint32_t px = 0xff000000u | (v << 16) | (v << 8) | v;
+                    memcpy(line + (size_t)x * bpp, &px, bpp < 4 ? bpp : 4);
+                }
             }
             dma_memory_write(&address_space_memory, buf + (uint64_t)y * pitch,
                              line, (size_t)width * bpp, MEMTXATTRS_UNSPECIFIED);
@@ -178,6 +295,10 @@ static void imx93_isi_reset(DeviceState *dev)
     timer_del(s->frame_timer);
     memset(s->regs, 0, sizeof(s->regs));
     s->frame = 0;
+    s->frame_index = 0;
+    if (s->frame_fp) {
+        rewind(s->frame_fp);
+    }
     qemu_set_irq(s->irq, 0);
 }
 
@@ -196,7 +317,31 @@ static void imx93_isi_realize(DeviceState *dev, Error **errp)
     IMX93IsiState *s = IMX93_ISI(dev);
 
     s->frame_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, imx93_isi_frame_tick, s);
+
+    /* Open the host frame source, if the "frames" property was given. */
+    if (!imx93_isi_frames_open(s, errp) && *errp) {
+        return;
+    }
 }
+
+static void imx93_isi_finalize(Object *obj)
+{
+    IMX93IsiState *s = IMX93_ISI(obj);
+
+    if (s->frame_fp) {
+        fclose(s->frame_fp);
+    }
+    for (int i = 0; i < s->n_frame_files; i++) {
+        g_free(s->frame_files[i]);
+    }
+    g_free(s->frame_files);
+    g_free(s->frame_buf);
+    g_free(s->frames_path);
+}
+
+static const Property imx93_isi_properties[] = {
+    DEFINE_PROP_STRING("frames", IMX93IsiState, frames_path),
+};
 
 static const VMStateDescription vmstate_imx93_isi = {
     .name = TYPE_IMX93_ISI,
@@ -217,6 +362,7 @@ static void imx93_isi_class_init(ObjectClass *oc, const void *data)
     dc->realize = imx93_isi_realize;
     device_class_set_legacy_reset(dc, imx93_isi_reset);
     dc->vmsd = &vmstate_imx93_isi;
+    device_class_set_props(dc, imx93_isi_properties);
 }
 
 static const TypeInfo imx93_isi_types[] = {
@@ -225,6 +371,7 @@ static const TypeInfo imx93_isi_types[] = {
         .parent         = TYPE_SYS_BUS_DEVICE,
         .instance_size  = sizeof(IMX93IsiState),
         .instance_init  = imx93_isi_init,
+        .instance_finalize = imx93_isi_finalize,
         .class_init     = imx93_isi_class_init,
     },
 };

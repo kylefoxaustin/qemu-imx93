@@ -396,11 +396,15 @@ int main(int argc, char **argv)
         }
         const uint8_t *p = mem[b.index];
         uint32_t used = planes[0].bytesused, nz = 0, j;
+        uint32_t fnv = 0x811c9dc5u;     /* FNV-1a over the captured frame */
         for (j = 0; j < used && j < 65536; j++) {
             nz += p[j] != 0;
         }
-        printf("CAMERA-CAP[%s]: frame %d buf=%u used=%u nz(64k)=%u "
-               "p[0..3]=%02x%02x%02x%02x\n", dev, i, b.index, used, nz,
+        for (j = 0; j < used; j++) {
+            fnv = (fnv ^ p[j]) * 0x01000193u;
+        }
+        printf("CAMERA-CAP[%s]: frame %d buf=%u used=%u nz(64k)=%u fnv=%08x "
+               "p[0..3]=%02x%02x%02x%02x\n", dev, i, b.index, used, nz, fnv,
                p[0], p[1], p[2], p[3]);
         got += (used > 0 && nz > 0);
         xioctl(fd, VIDIOC_QBUF, &b);
