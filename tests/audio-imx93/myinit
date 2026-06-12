@@ -10,7 +10,7 @@ PATH=/sbin:/usr/sbin:/bin:/usr/bin; export PATH
 
 echo "=== AUDIO: loading SAI/codec drivers ==="
 for m in snd-soc-fsl-utils snd-soc-fsl-sai snd-soc-fsl-micfil imx-pcm-dma \
-         snd-soc-dmic snd-soc-imx-card snd-soc-fsl-asoc-card \
+         snd-soc-wm8962 snd-soc-dmic snd-soc-imx-card snd-soc-fsl-asoc-card \
          snd-soc-simple-card snd-soc-simple-card-utils; do
     /sbin/modprobe "$m" 2>&1 | sed "s/^/modprobe $m: /"
 done
