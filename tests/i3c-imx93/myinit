@@ -1,0 +1,32 @@
+#!/bin/sh
+# I3C functional check for the i.MX93 QEMU machine.
+#
+# With the imx93-...-i3c device tree the wm8962 codec moves off LPI2C onto the
+# I3C1 bus (Silvaco master @ 0x44330000) as a legacy-I2C target. The model
+# (hw/i3c/svc_i3c.c) bridges I3C to a real QEMU I2C bus, so the silvaco-i3c
+# adapter registers, the wm8962 codec probes over it, and the wm8962 audio card
+# comes up. Expect:
+#
+#   /sys/bus/i3c/devices/i3c-0           (the I3C master's bus)
+#   wm8962 8-001a: customer id 0 revision A   (codec probed over I3C, on i2c-8)
+#   card: wm8962-audio                   (the ASoC card registered)
+PATH=/sbin:/usr/sbin:/bin:/usr/bin; export PATH
+/bin/mount -t proc proc /proc 2>/dev/null
+/bin/mount -t sysfs sysfs /sys 2>/dev/null
+/bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null
+sleep 3
+for m in snd-soc-fsl-utils snd-soc-fsl-sai imx-pcm-dma snd-soc-wm8962 \
+         snd-soc-fsl-asoc-card snd-soc-simple-card snd-soc-simple-card-utils; do
+    modprobe "$m" 2>&1 | sed "s/^/  modprobe $m: /"
+done
+sleep 3
+
+echo "=== I3C TEST ==="
+echo "--- i3c buses ---"
+for d in /sys/bus/i3c/devices/i3c-*; do echo "  $d -> present"; done
+echo "--- wm8962 probe over I3C (dmesg) ---"
+dmesg | grep -aiE "wm8962.*customer id|44330000.i3c" | tail -4
+echo "--- asound cards ---"
+cat /proc/asound/cards 2>/dev/null | grep -iE "wm8962|card"
+echo "=== I3C DONE ==="
+while true; do sleep 5; done
