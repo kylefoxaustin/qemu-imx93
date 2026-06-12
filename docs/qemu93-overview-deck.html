@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<!--
+  QEMU i.MX 93 — overview deck (self-contained, no dependencies).
+  Open in any browser. Navigate: → / ← / Space, or click the edges.
+  Print to PDF: Ctrl/Cmd-P (each slide is a page).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QEMU i.MX 93 — Overview</title>
+<style>
+  :root{
+    --bg:#0d1320; --bg2:#121b2e; --ink:#e8eef7; --dim:#9fb0c7;
+    --accent:#39d2c0; --accent2:#5b9dff; --warn:#ffb454; --line:#243349;
+    --good:#39d2c0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:#05080f; color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .deck{height:100vh;width:100vw;overflow:hidden;position:relative}
+  .slide{
+    position:absolute;inset:0;display:none;flex-direction:column;
+    padding:4.2vh 5vw;
+    background:radial-gradient(120% 120% at 0% 0%,var(--bg2),var(--bg) 60%);
+    animation:fade .25s ease;
+  }
+  .slide.on{display:flex}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .kicker{color:var(--accent);font-weight:700;letter-spacing:.14em;
+    text-transform:uppercase;font-size:1.05vh;font-size:clamp(11px,1.5vh,15px)}
+  h1{font-size:clamp(28px,5.4vh,52px);line-height:1.05;margin:.4vh 0 1vh;font-weight:800}
+  h1 .accent{color:var(--accent)}
+  h2{font-size:clamp(22px,4.2vh,40px);font-weight:800;margin-bottom:.4vh}
+  .sub{color:var(--dim);font-size:clamp(15px,2.4vh,22px);max-width:62ch;margin-bottom:2.2vh}
+  .grid{display:grid;gap:1.6vh 2.2vw}
+  .why{grid-template-columns:1fr 1fr;margin-top:1vh}
+  .why .card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+    padding:1.8vh 1.6vw}
+  .why .card b{color:var(--accent2);display:block;font-size:clamp(14px,2vh,18px);margin-bottom:.5vh}
+  .why .card span{color:var(--dim);font-size:clamp(12px,1.7vh,15px);line-height:1.45}
+  .help{margin-top:auto;padding-top:2vh;border-top:1px solid var(--line);
+    color:var(--dim);font-size:clamp(12px,1.8vh,16px)}
+  .help b{color:var(--ink)}
+  .pill{display:inline-block;background:#16233a;border:1px solid var(--line);
+    border-radius:999px;padding:.4vh .9vw;margin:.3vh .3vw;color:var(--ink);
+    font-size:clamp(11px,1.6vh,14px)}
+
+  /* ---- stack slide ---- */
+  .stack{display:grid;grid-template-columns:1fr 1fr;gap:1.4vw;flex:1;min-height:0}
+  .col{background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+    padding:1.6vh 1.4vw;display:flex;flex-direction:column;min-height:0;overflow:auto}
+  .col h3{font-size:clamp(13px,2vh,18px);letter-spacing:.1em;text-transform:uppercase;
+    margin-bottom:1vh}
+  .col.hw h3{color:var(--accent)} .col.sw h3{color:var(--accent2)}
+  .row{display:flex;gap:.6vw;align-items:flex-start;padding:.58vh 0;
+    border-bottom:1px dashed #1c2740;font-size:clamp(11px,1.66vh,15px);line-height:1.22}
+  .row:last-child{border-bottom:0}
+  .row .t{color:var(--dim);min-width:9.5vw;color:#7f93b0;font-weight:600}
+  .row .d{color:var(--ink)}
+  .mu{margin-top:1.2vh;text-align:center;color:var(--dim);
+    font-size:clamp(11px,1.7vh,15px)}
+  .mu b{color:var(--accent)}
+
+  /* ---- capability tiles ---- */
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:1.3vh 1.4vw;flex:1;align-content:start;margin-top:1vh}
+  .tile{background:var(--bg2);border:1px solid var(--line);border-radius:13px;padding:1.4vh 1.2vw}
+  .tile b{color:var(--good);font-size:clamp(13px,1.95vh,18px)}
+  .tile span{display:block;color:var(--dim);margin-top:.5vh;font-size:clamp(11px,1.55vh,14px);line-height:1.38}
+  .tile.star{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+
+  /* ---- limits table ---- */
+  .limits{flex:1;margin-top:1vh;display:flex;flex-direction:column;gap:1.1vh}
+  .lrow{display:grid;grid-template-columns:32% 1fr;gap:1.5vw;background:var(--bg2);
+    border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:10px;
+    padding:1.3vh 1.3vw;align-items:center}
+  .lrow.ok{border-left-color:var(--good)}
+  .lrow .f{font-weight:700;color:var(--ink);font-size:clamp(13px,1.95vh,17px)}
+  .lrow .r{color:var(--dim);font-size:clamp(11px,1.7vh,15px);line-height:1.35}
+  .footer{margin-top:auto;padding-top:1.6vh;border-top:1px solid var(--line);
+    color:var(--dim);font-size:clamp(12px,1.85vh,16px)}
+  .footer b{color:var(--warn)}
+
+  /* chrome */
+  .nav{position:fixed;bottom:2.4vh;right:3vw;color:#6c80a0;font-size:13px;
+    display:flex;gap:14px;align-items:center;z-index:5}
+  .dot{width:9px;height:9px;border-radius:50%;background:#2a3a55;cursor:pointer}
+  .dot.on{background:var(--accent)}
+  .edge{position:fixed;top:0;bottom:0;width:12vw;cursor:pointer;z-index:4}
+  .edge.l{left:0} .edge.r{right:0}
+  @media print{
+    .nav,.edge{display:none}
+    .slide{display:flex!important;position:relative;height:100vh;page-break-after:always;animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+  <!-- SLIDE 1 -->
+  <section class="slide on">
+    <div class="kicker">NXP i.MX 93 · Full-System Emulator</div>
+    <h1>QEMU&nbsp;i.MX&nbsp;93 — boot the <span class="accent">real</span> software stack,<br>no silicon required.</h1>
+    <p class="sub">The first full functional model of the i.MX 93 SoC in QEMU. It boots U-Boot
+      and a stock NXP BSP Linux on a virtual i.MX 93 — a heterogeneous <b>2× Cortex-A55 + Cortex-M33</b>
+      machine. There is <b>no System Manager</b> to lean on: Linux programs the clocks and power
+      (CCM / ANATOP) directly, exactly as it does on the silicon, and the model answers.</p>
+    <div class="grid why">
+      <div class="card"><b>Develop before silicon</b><span>Bring up BSP, drivers, and M33 firmware without a board — or before the chip is on your desk.</span></div>
+      <div class="card"><b>Reproducible &amp; scriptable</b><span>Every capability is a one-command test. Drop it into CI; it never wears out or drifts.</span></div>
+      <div class="card"><b>Deeply debuggable</b><span>gdb on any core, full tracing, fault injection, multi-day soak — visibility real hardware can't give.</span></div>
+      <div class="card"><b>Scales freely</b><span>Run many instances in parallel. No board contention, no lab, no shipping.</span></div>
+    </div>
+    <div class="help"><b>Who it's for:</b> &nbsp;BSP &amp; driver development&nbsp;·&nbsp;M33 / NPU firmware bring-up&nbsp;·&nbsp;edge-AI (Ethos-U) software&nbsp;·&nbsp;CI / regression&nbsp;·&nbsp;training &amp; exploration</div>
+  </section>
+
+  <!-- SLIDE 2 -->
+  <section class="slide">
+    <div class="kicker">What's modeled — silicon ↔ software</div>
+    <h2>The full stack, top to bottom</h2>
+    <p class="sub" style="margin-bottom:1.4vh">Real software runs on a real-shaped machine. The two halves meet at the Messaging Units — and the bottom of the software column is firmware on the M33, <b>not</b> a System Manager.</p>
+    <div class="stack">
+      <div class="col hw">
+        <h3>◀ Hardware (silicon blocks)</h3>
+        <div class="row"><span class="t">Compute</span><span class="d">2× Cortex-A55 application cluster</span></div>
+        <div class="row"><span class="t">Real-time</span><span class="d">Cortex-M33 (its own ITCM/DTCM, NVIC) — runs real firmware</span></div>
+        <div class="row"><span class="t">Interrupts</span><span class="d">GICv3 distributor + redistributor</span></div>
+        <div class="row"><span class="t">Clock / power</span><span class="d"><b style="color:var(--accent)">CCM · ANATOP · BLK-CTRL</b> — programmed directly by Linux</span></div>
+        <div class="row"><span class="t">Display</span><span class="d">LCDIFv3 scanout · MIPI-DSI · ADV7535 HDMI · PXP 2D (g2d)</span></div>
+        <div class="row"><span class="t">Camera</span><span class="d">MIPI CSI-2 · parallel CSI · ISI capture</span></div>
+        <div class="row"><span class="t">Network</span><span class="d">FEC · eQOS (dwmac) — memory-mapped, no NETC</span></div>
+        <div class="row"><span class="t">USB / Storage</span><span class="d">USB2 ChipIdea ×2 · uSDHC eMMC/SD ×3 · FlexSPI NOR</span></div>
+        <div class="row"><span class="t">Audio</span><span class="d">SAI ×3 · MICFIL PDM · SPDIF/XCVR · WM8962</span></div>
+        <div class="row"><span class="t">Edge AI</span><span class="d"><b style="color:var(--accent)">Ethos-U65 microNPU</b> (open Arm IP, functional)</span></div>
+        <div class="row"><span class="t">Low-speed</span><span class="d">LPI²C/LPSPI/LPUART ×8 · FlexCAN · FlexIO · GPIO/PWM/ADC · eDMA</span></div>
+        <div class="row"><span class="t">Plumbing</span><span class="d"><b style="color:var(--accent)">Messaging Units (MU)</b> · OCOTP eFuse · EdgeLock SE (ELE)</span></div>
+      </div>
+      <div class="col sw">
+        <h3>Software (what runs) ▶</h3>
+        <div class="row"><span class="t">Apps</span><span class="d">Weston desktop · GStreamer · TFLite (Ethos-U delegate)</span></div>
+        <div class="row"><span class="t">Userspace</span><span class="d">Wayland · V4L2 · ALSA · DRM/KMS · libg2d (PXP)</span></div>
+        <div class="row"><span class="t">Kernel</span><span class="d">Stock NXP BSP Linux + in-tree drivers</span></div>
+        <div class="row"><span class="t">Comms</span><span class="d">rpmsg · remoteproc · nvmem &nbsp;<i style="color:#5b7099">(no SCMI — none needed)</i></span></div>
+        <div class="row"><span class="t">Bootloader</span><span class="d">U-Boot — SPL + proper</span></div>
+        <div class="row" style="border-top:1px solid var(--line);margin-top:.6vh;padding-top:1vh"><span class="t" style="color:var(--accent2)">runs on ↓</span><span class="d"></span></div>
+        <div class="row"><span class="t">M33 firmware</span><span class="d"><b style="color:var(--accent2)">Real Ethos NPU firmware</b> on the Cortex-M33 (drives the microNPU)</span></div>
+        <div class="row"><span class="t">Security</span><span class="d">EdgeLock enclave (ELE) message responder</span></div>
+        <div class="row"><span class="t">No SM layer</span><span class="d"><i style="color:#5b7099">no System Manager, no SCMI server — Linux owns the clocks</i></span></div>
+      </div>
+    </div>
+    <div class="mu"><b>Messaging Units</b> tie the cores together — A55↔M33 (rpmsg) and the ELE channels ride the MU doorbell + shared-memory transport. The NPU's interrupt is wired to the <b>M33 NVIC</b>, not the A55 GIC.</div>
+  </section>
+
+  <!-- SLIDE 3 -->
+  <section class="slide">
+    <div class="kicker">What it enables for the 93</div>
+    <h2>What you can actually do</h2>
+    <p class="sub" style="margin-bottom:.6vh">Not "registers respond" — real end-to-end workloads, each one a CI-gated test.</p>
+    <div class="tiles">
+      <div class="tile star"><b>Ethos-U inference — it computes</b><span>Real Vela-compiled TFLite runs on the modelled NPU, <b style="color:var(--good)">bit-exact vs golden</b>. The M33 firmware drives it — open IP, no proprietary microcode.</span></div>
+      <div class="tile"><b>Boot Linux to userspace</b><span>On directly-programmed CCM/ANATOP — no SM stub, no SCMI.</span></div>
+      <div class="tile"><b>HDMI &amp; DSI display</b><span>LCDIFv3 → DSI → ADV7535 to real pixels; rm67199 MIPI panel scanout at 1080×1920.</span></div>
+      <div class="tile"><b>Wayland desktop</b><span>Weston composited through the PXP 2D engine (opaque + blended).</span></div>
+      <div class="tile"><b>PXP 2D — byte-exact</b><span>copy · fill · blit · blend · rotate, all verified to the byte.</span></div>
+      <div class="tile"><b>Networking</b><span>FEC + eQOS, real ping &amp; back-to-back traffic.</span></div>
+      <div class="tile"><b>Camera capture</b><span>Real V4L2 frames — parallel CSI (mt9m114) and MIPI CSI-2 (ov5640) → ISI.</span></div>
+      <div class="tile"><b>Full audio surface</b><span>SAI playback + capture, MICFIL PDM capture, SPDIF playback — all moving real DMA data.</span></div>
+      <div class="tile"><b>Block storage</b><span>eMMC / SD read + write, mount ext4 r/w.</span></div>
+      <div class="tile"><b>Heterogeneous compute</b><span>A55 Linux + M33 real-time core running real firmware, talking over the MUs.</span></div>
+      <div class="tile"><b>eFuse / EdgeLock</b><span>OCOTP nvmem + ELE responder; MAC fuses read.</span></div>
+      <div class="tile"><b>100% scriptable</b><span>Every capability above is a reproducible test gate — incl. multi-day soak.</span></div>
+    </div>
+  </section>
+
+  <!-- SLIDE 4 -->
+  <section class="slide">
+    <div class="kicker">Honest limits</div>
+    <h2>What doesn't work — and why</h2>
+    <p class="sub" style="margin-bottom:1vh">A short list — the i.MX 93 is a leaner SoC than its i.MX 95 sibling, so there is simply less to be missing. Every gap has one cause: a per-die secret we can't fake, or an upstream driver/QEMU model limit. Nothing is hand-waved.</p>
+    <div class="limits">
+      <div class="lrow ok"><div class="f">No GPU · no VPU · no hardware JPEG</div><div class="r">Not a model gap — <b style="color:var(--good)">the i.MX 93 silicon has none of these blocks</b>. There is no 3D or video-codec engine to emulate; JPEG and video are software on this part. (Its 2D path is the PXP, which <i>is</i> modelled.)</div></div>
+      <div class="lrow"><div class="f">PXP scale &amp; colour-space convert</div><div class="r">Blocked by the libg2d / pxp_dma_v3 driver stack itself (driver returns "unsupport 2d operation"; libg2d gates CSC on "unsupported alpha mode"), <b>not</b> a model gap. Copy/fill/blit/blend/rotate all work byte-exact.</div></div>
+      <div class="lrow"><div class="f">Secure boot · ELE crypto services</div><div class="r">Depend on per-die secrets (HUK, fused keys) that physically can't be modelled. Fuse <i>reads</i> work (plain data); the crypto engine is out of scope by design — and unused in emulation.</div></div>
+      <div class="lrow"><div class="f">Bring-up-only blocks: I3C · MIPI-CSI host · FlexIO non-I²C modes</div><div class="r">Modelled to driver registration, not a full data path (QEMU convention). The CSI-2 host stub is enough for the subdev to bind and capture to flow; SPI/UART/PWM FlexIO modes have no BSP user to exercise.</div></div>
+    </div>
+    <div class="footer"><b>The pattern:</b> &nbsp;if it's a silicon secret or closed driver behaviour, we model the <i>interface</i> and stop at the engine. If it's a QEMU limitation, we work around it transparently and write down exactly why. And where the 95 must say "NPU brings up but can't compute," the 93 says <b style="color:var(--good)">the NPU computes.</b></div>
+  </section>
+
+</div>
+
+<div class="edge l" onclick="go(-1)"></div>
+<div class="edge r" onclick="go(1)"></div>
+<div class="nav" id="nav"></div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  let i=0;
+  const nav=document.getElementById('nav');
+  slides.forEach((_,k)=>{const d=document.createElement('span');d.className='dot'+(k===0?' on':'');d.onclick=()=>show(k);nav.appendChild(d);});
+  const counter=document.createElement('span');nav.appendChild(counter);
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach((s,k)=>s.classList.toggle('on',k===i));
+    [...nav.querySelectorAll('.dot')].forEach((d,k)=>d.classList.toggle('on',k===i));
+    counter.textContent=` ${i+1} / ${slides.length}`;
+  }
+  function go(d){show(i+d);}
+  show(0);
+  addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){go(1);e.preventDefault();}
+    if(e.key==='ArrowLeft'||e.key==='PageUp'){go(-1);e.preventDefault();}
+    if(e.key==='Home')show(0); if(e.key==='End')show(slides.length-1);
+  });
+</script>
+</body>
+</html>
