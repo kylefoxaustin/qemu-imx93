@@ -175,24 +175,33 @@ enumerates — the registration bar, no working host data path yet).
   binds as a HID input and `-device usb-storage,drive=…` attaches as a SCSI
   disk (`sda`). The stock EVK device tree's Type-C role switch is unmodelled,
   but the controller falls back to host mode, so no DT override is needed.
-- **Audio playback (SAI3 + WM8962) — functional.** The ASoC stack registers all
-  three EVK ALSA cards (SAI1 bt-sco, MICFIL PDM capture, and the **WM8962**
-  speaker/headphone card on SAI3, via a modelled WM8962 codec on LPI2C1).
-  **Playback on the WM8962/SAI3 card moves real PCM end to end:** the SAI3 TX
-  FIFO drains at the audio word rate and requests bursts from a **cyclic eDMA3
-  scatter-gather** channel, which paces the whole stream into the FIFO with no
-  under-run. The clocked-out samples are handed to QEMU's audio backend, so
-  `-audio driver=wav,path=out.wav` captures the playback to a real `.wav` (a
-  played square wave comes back byte-correct). See `tests/audio-imx93/run.sh`
-  (set `WAV=out.wav`). Capture (SAI RX / MICFIL) still registers only.
-- **Camera capture — functional.** Booting the `…-mt9m114` DTB, the parallel
-  camera path runs end to end — MT9M114 sensor → parallel-CSI → ISI → V4L2 —
-  delivering **real frames out of `/dev/video0`**. The ISI model DMAs frames into
-  the driver's ping-pong buffers and raises the frame-done IRQ; a V4L2 client
-  enabling the (default-disabled) sensor link and propagating the pad formats
-  streams a moving test pattern (5/5 frames, MMAP buffers, byte-checked). The
-  V4L2 media graph (`/dev/media0`, four subdevs, two ISI `/dev/video*` nodes)
-  registers as before. See `tests/camera-imx93/run.sh`.
+- **Audio — functional (full surface).** The ASoC stack registers the EVK ALSA
+  cards (SAI1 bt-sco, the **WM8962** SAI3 card via a modelled codec, **MICFIL**
+  PDM, and the **XCVR/SPDIF** card). All the real datapaths move PCM end to end:
+  **WM8962/SAI3 playback** (SAI3 TX FIFO drains at the audio word rate, paced by
+  a **cyclic eDMA3 scatter-gather** channel) and **capture** (SAI-RX), **XCVR
+  SPDIF playback**, and **MICFIL PDM capture** — and they run **concurrently**
+  (the eDMA routes each request to its channel by `CHn_MUX` source). Playback is
+  handed to QEMU's audio backend, so `-audio driver=wav,path=out.wav` captures it
+  to a real `.wav` (a played square wave comes back byte-correct). See
+  `tests/audio-imx93/run.sh` (set `WAV=out.wav`).
+- **Camera capture — functional.** Both CSI front-ends run end to end to **real
+  frames out of `/dev/video0`**: the parallel path (`…-mt9m114` DTB: MT9M114 →
+  parallel-CSI → ISI → V4L2) and the **MIPI CSI-2** path (`…-frdm-ov5640` DTB:
+  ov5640 → dw-mipi-csi2 → ISI, after `modprobe ov5640`). The ISI model DMAs
+  frames into the driver's ping-pong buffers and raises the frame-done IRQ; a
+  V4L2 client enabling the (default-disabled) sensor link and propagating the pad
+  formats streams a moving test pattern (5/5 frames, MMAP buffers, byte-checked).
+  The media graph (`/dev/media0`, subdevs, two ISI `/dev/video*` nodes) registers
+  as before. See `tests/camera-imx93/run.sh`.
+- **Virtual camera — functional.** The ISI can scan **real host images** through
+  the capture pipeline instead of the test pattern — a sensor-less "virtual
+  camera". Point its `frames` property at a host path (a directory of `*.raw` or
+  a file of back-to-back raw frames) and the model reads the next frame each tick
+  and scans it out, looping: `-global driver=imx93.isi,property=frames,value=…`.
+  Byte-exact validated (fed-frame hash == captured hash, 5/5). Useful to feed a
+  sequence of images to drive the NPU or a vision pipeline. See
+  `tests/camera-imx93/csi-inject-test.sh` and `tests/camera-imx93/README.md`.
 - **Wayland desktop — functional.** A `core-image-weston` rootfs boots to the Weston
   compositor on the emulated display — desktop, panel/clock, and apps
   (e.g. `weston-terminal`), driven by the virtio keyboard + pointer. Software
@@ -298,13 +307,13 @@ desktop**.
 
 Each modelled block is taken to at least the bar where the Linux driver binds
 and the subsystem registers its devices — matching how QEMU SoC machines model
-controllers for driver bring-up rather than emulating end-to-end data paths to
-host audio/video sinks. Two intentional registration-bar non-goals remain: the
-SAI and camera paths register their ALSA/V4L2 devices but do not pump real
-samples/frames. The Ethos-U65 NPU, by contrast, went *past* that bar — the
-`hw/npu/` executor runs the Vela command stream and produces bit-exact int8
-inference output entirely inside QEMU (see "What runs today"), so it is a real
-SoC device model rather than a host stand-in.
+controllers for driver bring-up. Many blocks now go *past* that bar and move
+real data end to end: the **audio** surface (SAI3 playback + capture, MICFIL,
+SPDIF — concurrently), the **camera/ISI** path (real V4L2 frames from both CSI
+front-ends, plus a host-image "virtual camera"), **PXP** 2D (byte-exact), and
+the **Ethos-U65** NPU — whose `hw/npu/` executor runs the Vela command stream
+and produces bit-exact int8 inference output entirely inside QEMU. So these are
+real SoC device models rather than host stand-ins.
 
 ## Required artifacts
 
