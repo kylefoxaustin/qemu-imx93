@@ -28,27 +28,20 @@ that only surface under sustained, concurrent load.
 | DISPLAY  | `imx93-11x11-evk-rm67199`        | LCDIFv3 → DSI → rm67199 panel scanout (fb0 fill + page-flip DMA) |
 | FLEXIO   | `imx93-11x11-evk-flexio-i2c`     | tmp105 round-trips over FlexIO-as-I2C (also stresses the defer-shift anti-storm fix) |
 
-### MAIN audio surface and the eDMA2 dma-req limitation
+### MAIN audio surface
 
-The MAIN block drives the whole audio datapath: wm8962/SAI3 **playback** and
-**capture** (SAI-RX), XCVR/**SPDIF** playback, and **MICFIL** PDM capture.
+The MAIN block drives the whole audio datapath **continuously and
+concurrently**: wm8962/SAI3 **playback** and **capture** (SAI-RX) and
+XCVR/**SPDIF** playback all on eDMA2, plus **MICFIL** PDM capture on eDMA1 —
+every eDMA channel busy at once.
 
-There is a known **eDMA model limitation** that shapes how these are scheduled:
-SAI3 and XCVR share eDMA2's single `dma-req` GPIO line, and the model advances
-the *first* cyclic channel with `ERQ` set on each request pulse
-(`hw/dma/imx93_edma.c:edma_dma_request`). It does not carry a source id, so it
-cannot route a given peripheral's request to that peripheral's channel — one
-eDMA2 stream gets full service and any *second* concurrent eDMA2 stream is
-starved (its FIFO never drains, blocking `writei`/`readi`). Real hardware
-routes a distinct DMA request per peripheral via the channel mux; modelling
-that (per-source dma-req → CH_MUX-selected channel) is a follow-up on the
-shared `imx93_edma.c` (coordinate with the imx91 tree, which shares the file).
-
-To exercise every audio path at full bandwidth despite this, MAIN runs exactly
-**one eDMA2 stream at a time**, rotating SAI3 playback → SAI3 capture →
-XCVR/SPDIF playback (`AUDIO_OPS` ops each), while **MICFIL capture runs
-continuously on eDMA1** (independent) throughout. Audio never stops (one eDMA2
-path + MICFIL are always live) and each datapath is hammered in turn.
+This used to be impossible: the eDMA serviced the *first* armed cyclic channel
+on any request, so the SAI3 + XCVR streams sharing eDMA2 starved each other and
+MAIN had to run one eDMA2 stream at a time. That is fixed — `edma_dma_request`
+now routes each request to the channel whose `CHn_MUX` selected its source (and
+the SAI exposes separate TX/RX request lines), so all four streams run together.
+The fix is in the shared `imx93_edma.c` + `imx93_sai.c` (byte-identical with the
+imx91 tree); the per-SoC source-id wiring lives in the board.
 
 ## Usage
 

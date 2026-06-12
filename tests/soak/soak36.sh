@@ -161,31 +161,23 @@ WM=$(card_of wm8962); XC=$(card_of xcvr); MF=$(card_of micfil)
 echo "AUDIO CARDS wm8962=$WM xcvr=$XC micfil=$MF"
 echo 0 > /tmp/acount; echo 0 > /tmp/rxcount; echo 0 > /tmp/spcount; echo 0 > /tmp/mfcount
 echo 0 > /tmp/icount; echo 0 > /tmp/scount; echo 0 > /tmp/ncount
-# Audio datapath note: SAI3 and XCVR share eDMA2's single dma-req line, and the
-# model advances the first cyclic channel per request pulse - so one eDMA2
-# stream gets full service and any second eDMA2 stream is starved (a known eDMA
-# model limitation; see the soak README). MICFIL is on eDMA1 (independent). So
-# we run exactly ONE eDMA2 audio stream at a time at full bandwidth, ROTATING
-# SAI3 playback -> SAI3 capture (SAI-RX) -> XCVR/SPDIF playback, while MICFIL
-# PDM capture runs CONTINUOUSLY on eDMA1 throughout. Audio never stops (one
-# eDMA2 path + MICFIL are always live) and every datapath is hammered in turn.
-AUDIO_OPS=20   # back-to-back ops per eDMA2 phase before rotating (~2-3s each)
+# Audio datapath: the WHOLE surface driven CONTINUOUSLY and CONCURRENTLY -
+# SAI3 playback + SAI3 capture (SAI-RX) + XCVR/SPDIF playback all on eDMA2, plus
+# MICFIL PDM capture on eDMA1 - every eDMA channel busy at once. (The eDMA now
+# routes requests by CH_MUX source, so the eDMA2 streams no longer starve each
+# other; the earlier one-at-a-time rotation workaround is gone.)
 inc() { echo $(( $(cat "$1") + 1 )) > "$1"; }
-# MICFIL PDM capture - CONTINUOUS (eDMA1, independent of the eDMA2 rotation).
 [ -n "$MF" ] && ( while true; do
       /pcm_capture plughw:$MF,0 1 >/tmp/micfil.last 2>&1 && inc /tmp/mfcount
   done ) &
-# Rotating single eDMA2 stream: SAI-TX play -> SAI-RX capture -> XCVR/SPDIF.
-( while true; do
-      i=0; while [ $i -lt $AUDIO_OPS ]; do
-          [ -n "$WM" ] && /pcm_play hw:$WM,0 1 >/tmp/aud.last 2>&1 && inc /tmp/acount
-          i=$((i + 1)); done
-      i=0; while [ $i -lt $AUDIO_OPS ]; do
-          [ -n "$WM" ] && /pcm_capture hw:$WM,0 1 >/tmp/rx.last 2>&1 && inc /tmp/rxcount
-          i=$((i + 1)); done
-      i=0; while [ $i -lt $AUDIO_OPS ]; do
-          [ -n "$XC" ] && /pcm_play plughw:$XC,0 1 >/tmp/spdif.last 2>&1 && inc /tmp/spcount
-          i=$((i + 1)); done
+[ -n "$WM" ] && ( while true; do
+      /pcm_play hw:$WM,0 1 >/tmp/aud.last 2>&1 && inc /tmp/acount
+  done ) &
+[ -n "$WM" ] && ( while true; do
+      /pcm_capture hw:$WM,0 1 >/tmp/rx.last 2>&1 && inc /tmp/rxcount
+  done ) &
+[ -n "$XC" ] && ( while true; do
+      /pcm_play plughw:$XC,0 1 >/tmp/spdif.last 2>&1 && inc /tmp/spcount
   done ) &
 # B) i2c - hammer LPI2C1 reading the wm8962 id register (single transfer, no scan).
 ( ic=0; while true; do
