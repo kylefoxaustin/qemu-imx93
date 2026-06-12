@@ -22,11 +22,12 @@ that only surface under sustained, concurrent load.
 
 | Block    | DTB                              | Datapaths driven |
 |----------|----------------------------------|------------------|
-| MAIN     | `imx93-11x11-evk`                | full audio surface (see below) + LPI2C + SD storage (write/read/md5 verify) + slirp networking, all back-to-back |
+| MAIN     | `imx93-11x11-evk`                | full audio surface (see below) + **Ethos-U65 NPU inference** (bit-exact class check, boots the M33 + ethos firmware) + **PXP G2D** 2D copies + LPI2C + SD storage (write/read/md5 verify) + slirp networking, all concurrent |
 | CAMERA   | `imx93-11x11-evk-mt9m114`        | V4L2 capture, parallel-CSI path (mt9m114 → pcsi → ISI) |
 | MIPICAM  | `imx93-11x11-frdm-ov5640`        | V4L2 capture, MIPI CSI-2 path (ov5640 → dw-mipi-csi2 → ISI) |
 | DISPLAY  | `imx93-11x11-evk-rm67199`        | LCDIFv3 → DSI → rm67199 panel scanout (fb0 fill + page-flip DMA) |
 | FLEXIO   | `imx93-11x11-evk-flexio-i2c`     | tmp105 round-trips over FlexIO-as-I2C (also stresses the defer-shift anti-storm fix) |
+| I3C      | `imx93-11x11-evk-i3c`            | wm8962 moved onto the Silvaco I3C1 bus (legacy-I2C target); continuous PCM playback over I3C |
 
 ### MAIN audio surface
 
