@@ -1098,12 +1098,16 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
         }
 
         /*
-         * SAI3 TX FIFO requests are serviced by eDMA2 (the wm8962 playback
-         * path): wire its DMA-request line so the cyclic channel advances as
-         * the FIFO drains, pacing PCM playback at the audio word rate.
+         * SAI3 FIFO requests are serviced by eDMA2 (the wm8962 playback +
+         * capture path). Wire TX and RX to their distinct eDMA request-source
+         * lines (CH_MUX source ids from the evk DTB dmas=: TX 0x3c, RX 0x3d) so
+         * each advances its own cyclic channel - letting SAI3 playback, SAI3
+         * capture and the XCVR (below) all run on eDMA2 at once.
          */
-        qdev_connect_gpio_out_named(DEVICE(&s->sai[2]), "dma-req", 0,
-            qdev_get_gpio_in_named(DEVICE(&s->edma2), "dma-req", 0));
+        qdev_connect_gpio_out_named(DEVICE(&s->sai[2]), "dma-req-tx", 0,
+            qdev_get_gpio_in_named(DEVICE(&s->edma2), "dma-req", 0x3c));
+        qdev_connect_gpio_out_named(DEVICE(&s->sai[2]), "dma-req-rx", 0,
+            qdev_get_gpio_in_named(DEVICE(&s->edma2), "dma-req", 0x3d));
 
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->micfil), errp)) {
             return;
@@ -1121,7 +1125,7 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
          * the FIFO fills, pacing PDM capture at the audio word rate.
          */
         qdev_connect_gpio_out_named(DEVICE(&s->micfil), "dma-req", 0,
-            qdev_get_gpio_in_named(DEVICE(&s->edma1), "dma-req", 0));
+            qdev_get_gpio_in_named(DEVICE(&s->edma1), "dma-req", 0x1d));
     }
 
     /*
@@ -1279,11 +1283,12 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
                        qdev_get_gpio_in(gicdev, FSL_IMX93_XCVR_IRQ));
     /*
      * The XCVR (SPDIF) shares eDMA2 with SAI3 (both in the 0x4268xxxx region):
-     * wire its TX DMA-request so the cyclic playback channel advances as the
-     * SPDIF TX FIFO drains at the audio word rate.
+     * wire its TX DMA-request to its own request-source line (CH_MUX source id
+     * 0x42 from the evk DTB dmas=) so the cyclic playback channel advances as
+     * the SPDIF TX FIFO drains - independent of the SAI3 streams on eDMA2.
      */
     qdev_connect_gpio_out_named(DEVICE(&s->xcvr), "dma-req", 0,
-        qdev_get_gpio_in_named(DEVICE(&s->edma2), "dma-req", 0));
+        qdev_get_gpio_in_named(DEVICE(&s->edma2), "dma-req", 0x42));
 
     /* TSTMR1/2 timestamp timers + SEMA42 hardware semaphores (Group A). */
     {

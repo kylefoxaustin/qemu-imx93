@@ -141,7 +141,7 @@ static void imx93_sai_tx_tick(void *opaque)
      * interrupts coming at real time and the playback from under-running.
      */
     if (dma && s->tx_count <= watermark) {
-        qemu_irq_pulse(s->dma_req);
+        qemu_irq_pulse(s->dma_req_tx);
     }
 
     imx93_sai_tx_update_flags(s);
@@ -257,7 +257,7 @@ static void imx93_sai_rx_tick(void *opaque)
      * paced by this fill rate, which keeps the period interrupts at real time.
      */
     if (dma && s->rx_count > watermark) {
-        qemu_irq_pulse(s->dma_req);
+        qemu_irq_pulse(s->dma_req_rx);
     }
 
     timer_mod(s->rx_timer,
@@ -452,7 +452,8 @@ static void imx93_sai_realize(DeviceState *dev, Error **errp)
                           TYPE_IMX93_SAI, IMX93_SAI_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
     sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq);
-    qdev_init_gpio_out_named(dev, &s->dma_req, "dma-req", 1);
+    qdev_init_gpio_out_named(dev, &s->dma_req_tx, "dma-req-tx", 1);
+    qdev_init_gpio_out_named(dev, &s->dma_req_rx, "dma-req-rx", 1);
     s->tx_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, imx93_sai_tx_tick, s);
     s->rx_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, imx93_sai_rx_tick, s);
 

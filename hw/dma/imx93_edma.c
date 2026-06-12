@@ -37,7 +37,18 @@
 #define CH_SBR      0x0c
 #define CH_PRI      0x10
 #define CH_MUX      0x14
+#define   CH_MUX_SRC_MASK 0xff   /* CHn_MUX[7:0] = DMA request source select */
 #define CH_MATTR    0x18
+
+/*
+ * Number of distinct peripheral DMA-request source lines into the controller.
+ * The eDMA's channel mux (CHn_MUX) routes a given request source to whichever
+ * channel selected it, so each source is a separate input line (indexed by its
+ * 8-bit source id) and a request advances only the channel whose CH_MUX
+ * matches. 256 covers the whole 8-bit source space; a board wires only the few
+ * lines its peripherals use.
+ */
+#define EDMA_NUM_DMA_REQ 256
 /* TCD (struct fsl_edma_hw_tcd) within the channel page. */
 #define TCD_SADDR   0x20
 #define TCD_SOFF    0x24
@@ -269,9 +280,21 @@ static void edma_service_minor(IMX93EdmaState *s, int ch)
     }
 }
 
-/* A peripheral DMA request: advance the cyclic channel that serves it. */
+/*
+ * A peripheral DMA request on source line n: advance the cyclic channel whose
+ * channel mux (CHn_MUX) selected that source. Routing by CH_MUX is what lets
+ * two peripherals that share a controller (e.g. SAI3 + XCVR on eDMA2) run
+ * concurrently - each request reaches only its own channel, instead of always
+ * servicing the first armed channel and starving the other.
+ *
+ * Fall back to the first armed cyclic channel when no CH_MUX matches: the
+ * eDMA3-generation instance (eDMA1, AONMIX) routes by an integrated mux rather
+ * than CHn_MUX, so its CH_MUX reads 0 - there a single peripheral (e.g. MICFIL)
+ * owns the only armed channel and the fallback delivers correctly.
+ */
 static void edma_dma_request(void *opaque, int n, int level)
 {
+    IMX93EdmaChan *c;
     IMX93EdmaState *s = opaque;
     int i;
 
@@ -279,8 +302,15 @@ static void edma_dma_request(void *opaque, int n, int level)
         return;
     }
     for (i = 0; i < s->num_channels; i++) {
-        IMX93EdmaChan *c = &s->chan[i];
-
+        c = &s->chan[i];
+        if (c->cyclic && (ld32(c->regs + CH_CSR) & CH_CSR_ERQ) &&
+            (ld32(c->regs + CH_MUX) & CH_MUX_SRC_MASK) == n) {
+            edma_service_minor(s, i);
+            return;
+        }
+    }
+    for (i = 0; i < s->num_channels; i++) {
+        c = &s->chan[i];
         if (c->cyclic && (ld32(c->regs + CH_CSR) & CH_CSR_ERQ)) {
             edma_service_minor(s, i);
             return;
@@ -482,8 +512,12 @@ static void imx93_edma_realize(DeviceState *dev, Error **errp)
         sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq[i]);
     }
 
-    /* Peripheral DMA request line (e.g. the SAI's FIFO-needs-data request). */
-    qdev_init_gpio_in_named(dev, edma_dma_request, "dma-req", 1);
+    /*
+     * Peripheral DMA request lines, one per request source id (e.g. the SAI's
+     * FIFO-needs-data request). A request on line n advances the channel whose
+     * CH_MUX selected source n.
+     */
+    qdev_init_gpio_in_named(dev, edma_dma_request, "dma-req", EDMA_NUM_DMA_REQ);
 }
 
 static const Property imx93_edma_properties[] = {
