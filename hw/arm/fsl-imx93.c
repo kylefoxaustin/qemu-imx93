@@ -199,7 +199,7 @@ static void fsl_imx93_install_unimplemented(FslImx93State *s)
         FSL_IMX93_BLK_CTRL_DDRMIX,
         FSL_IMX93_TRDC,
         FSL_IMX93_MIPI_CSI,
-        FSL_IMX93_I3C1, FSL_IMX93_I3C2,
+        FSL_IMX93_I3C2,
         FSL_IMX93_FLEXIO2,
     };
 
@@ -1124,6 +1124,23 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
             qdev_get_gpio_in_named(DEVICE(&s->edma1), "dma-req", 0));
     }
 
+    /*
+     * I3C1 (AONMIX): a functional Silvaco I3C master. The imx93-...-i3c device
+     * tree moves the wm8962 codec onto the I3C bus as a legacy I2C target, so
+     * attach a wm8962 at 0x1a to the controller's built-in I2C bus. Other DTBs
+     * omit the node, so the controller sits idle. (I3C2 stays a logging stub -
+     * no DTB exercises it.)
+     */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->i3c1), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->i3c1), 0,
+                    fsl_imx93_memmap[FSL_IMX93_I3C1].addr);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->i3c1), 0,
+                       qdev_get_gpio_in(gicdev, FSL_IMX93_I3C1_IRQ));
+    i2c_slave_create_simple(s->i3c1.bus->i2c_bus, TYPE_WM8962,
+                            FSL_IMX93_WM8962_ADDR);
+
     /* All peripherals not yet modeled get logging stubs. */
     /*
      * Ethos-U65 microNPU @ 0x4a900000, driven by the M33 ethos firmware. The
@@ -1387,6 +1404,7 @@ static void fsl_imx93_init(Object *obj)
     }
 
     object_initialize_child(obj, "micfil", &s->micfil, TYPE_IMX93_MICFIL);
+    object_initialize_child(obj, "i3c1", &s->i3c1, TYPE_SVC_I3C);
 
     for (i = 0; i < FSL_IMX93_NUM_GPIOS; i++) {
         g_autofree char *name = g_strdup_printf("gpio%d", i + 1);

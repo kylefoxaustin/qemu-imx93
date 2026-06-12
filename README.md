@@ -105,8 +105,8 @@ This port holds that bar, and goes past it where the data path is the point:
 - **Deferred / not on silicon.** No 3D GPU; the 2D PXP does accelerated G2D
   copy + fill + blit + src-over blend + rotation (see below), enough for
   `use-g2d=true` Weston to composite opaque *and* alpha-blended surfaces. CSC is
-  not modelled; g2d scale is rejected by the driver. MIPI-CSI (the parallel
-  camera path is functional), I3C and FlexIO2 are unmodelled stubs.
+  not modelled; g2d scale is rejected by the driver. FlexIO2 is an unmodelled
+  stub.
 
 The per-device tags under **What runs today** make this split explicit.
 
@@ -133,6 +133,12 @@ enumerates — the registration bar, no working host data path yet).
   controllers** are real (was 3) and each I²C bus is named, so peripherals attach
   at runtime — `-device tmp105,bus=lpi2c5,address=0x49` is read/written from
   Linux byte-exact. (LPSPI1–8 expose SSI buses the same way.)
+- **I3C — functional.** I3C1 is a real Silvaco (`silvaco,i3c-master-v1`)
+  controller (`hw/i3c/svc_i3c.c`). Booting the `…-i3c` DTB, which moves the
+  wm8962 codec onto the I3C bus as a legacy-I²C target, the controller's I3C
+  adapter registers and the codec probes over it (`wm8962 8-001a: customer id 0
+  revision A`), bringing the wm8962 audio card up. (I3C2 is a logging stub — no
+  DTB exercises it.)
 - **FlexIO I²C — functional.** Booting the `…-flexio-i2c` DTB, the FlexIO
   shifter/timer fabric is driven as an extra I²C master (`nxp,imx-flexio` +
   `i2c-flexio`) → `/dev/i2c-8`. The model clocks the I²C handshake against a real
