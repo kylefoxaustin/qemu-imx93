@@ -116,8 +116,9 @@ Stock **NXP Linux 6.12.49** boots to userspace (PID 1) on both Cortex-A55
 cores, on the **stock `imx93-11x11-evk` device tree — no DT modifications**.
 
 Each device below is tagged **functional** (the host driver's data path runs
-end to end) or **brings up** (the driver binds and the device registers /
-enumerates — the registration bar, no working host data path yet).
+end to end — data actually moves) or **brings up** (the driver binds and the
+device registers / enumerates — the registration bar, no working host data path
+yet).
 
 - **SMP boot — functional.** Both A55 cores to userspace, **serial console**
   on `ttyLP0`, clean **PSCI power-off**.
