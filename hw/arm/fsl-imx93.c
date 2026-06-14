@@ -212,6 +212,26 @@ static void fsl_imx93_install_unimplemented(FslImx93State *s)
 }
 
 /*
+ * Start/stop the Cortex-M33, keeping its PSCI power_state and halt_reason
+ * consistent with cs->halted. The boot BH and the SiP RPROC SMC drive the M33
+ * lifecycle directly (not via the PSCI powerctl path), so we maintain these
+ * fields ourselves: arm_cpu_has_work() asserts that a PSCI_OFF CPU is halted
+ * for PSCI (halt_reason == HALT_PSCI). Leaving a running M33 at PSCI_OFF was
+ * harmless before the WFI/WFE halt_reason rework but trips that assert after it
+ * (a running core that executes WFI gets halt_reason = HALT_WFI); before the
+ * rework the same inconsistency instead made WFI a busy no-op, spinning a host
+ * core forever whenever the M33 idled.
+ */
+static void fsl_imx93_set_cpu_run(CPUState *cs, bool run)
+{
+    ARMCPU *cpu = ARM_CPU(cs);
+
+    cs->halted = !run;
+    cpu->power_state = run ? PSCI_ON : PSCI_OFF;
+    cpu->env.halt_reason = run ? NOT_HALTED : HALT_PSCI;
+}
+
+/*
  * Release the Cortex-M33 only once firmware has actually been staged into its
  * ITCM. An M-profile reset vector starts with the initial stack pointer, so a
  * non-zero first ITCM word means a vector table is present (loaded via
@@ -230,7 +250,7 @@ static void fsl_imx93_m33_start_bh(void *opaque)
     if (initial_sp != 0 && s->m33.cpu) {
         CPUState *cs = CPU(s->m33.cpu);
 
-        cs->halted = 0;
+        fsl_imx93_set_cpu_run(cs, true);
         cpu_resume(cs);
         s->m33_started = true;
     }
@@ -247,7 +267,7 @@ static void fsl_imx93_m33_rproc_start_bh(void *opaque)
     CPUState *cs = CPU(s->m33.cpu);
 
     cpu_reset(cs);
-    cs->halted = 0;
+    fsl_imx93_set_cpu_run(cs, true);
     cpu_resume(cs);
 }
 
@@ -256,7 +276,7 @@ static void fsl_imx93_m33_rproc_stop_bh(void *opaque)
     FslImx93State *s = opaque;
     CPUState *cs = CPU(s->m33.cpu);
 
-    cs->halted = 1;
+    fsl_imx93_set_cpu_run(cs, false);
     cpu_reset(cs);
 }
 
