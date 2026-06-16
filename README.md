@@ -14,7 +14,7 @@ A QEMU machine type for the NXP **i.MX 93** SoC, targeting the **11×11 EVK**
 qemu-imx93 is the **first QEMU model of the i.MX 93**. It boots stock NXP BSP
 Linux to userspace on the dual Cortex-A55 cluster and brings up essentially the
 whole EVK: **networking** (FEC + eQOS, both with DHCP), **SD/eMMC storage**,
-**GPIO/PMIC**, the **EdgeLock Enclave** mailbox, **eDMA3/4**, a full
+**GPIO/PMIC**, the **EdgeLock Enclave** mailbox, **eDMA1/2**, a full
 **LCDIFv3 → MIPI-DSI → ADV7535 → HDMI** (and LVDS) **display** you can log into
 and type on, a **Weston/Wayland desktop**, **FlexCAN**, **USB host** (real
 devices enumerate), **SAI3/WM8962 audio playback** (real PCM, capturable to a
@@ -152,8 +152,10 @@ yet).
   at 5000 back-to-back round-trips with zero stalls.
 - **GPIO + ELE — functional.** GPIO controllers; **ELE** (EdgeLock Enclave) s4
   MU + responder, so the OCOTP MAC nvmem cells resolve.
-- **eDMA3 — functional.** (`hw/dma/imx93_edma.c`) real TCD execution (drives the
-  LPI2C EDID read, among others).
+- **eDMA1/2 — functional.** (`hw/dma/imx93_edma.c`) real TCD execution — `edma1`
+  (AONMIX, the `edma3`-gen IP) drives the LPI2C EDID read among others; `edma2`
+  (WAKEUPMIX, `edma4`-gen) paces the audio FIFOs. (Linux/DT name the instances
+  `edma1`/`edma2`; "edma3/edma4" are their IP generations.)
 - **Display, HDMI — functional.** Full pipeline — the LCDIFv3 controller scans a framebuffer
   out of guest DRAM; a dw-mipi-dsi host + an ADV7535 HDMI bridge (with a
   generated EDID served over I²C-DDC) satisfy the DRM stack, which sets a
@@ -180,7 +182,7 @@ yet).
   cards (SAI1 bt-sco, the **WM8962** SAI3 card via a modelled codec, **MICFIL**
   PDM, and the **XCVR/SPDIF** card). All the real datapaths move PCM end to end:
   **WM8962/SAI3 playback** (SAI3 TX FIFO drains at the audio word rate, paced by
-  a **cyclic eDMA3 scatter-gather** channel) and **capture** (SAI-RX), **XCVR
+  a **cyclic eDMA2 scatter-gather** channel) and **capture** (SAI-RX), **XCVR
   SPDIF playback**, and **MICFIL PDM capture** — and they run **concurrently**
   (the eDMA routes each request to its channel by `CHn_MUX` source). Playback is
   handed to QEMU's audio backend, so `-audio driver=wav,path=out.wav` captures it
@@ -374,7 +376,7 @@ userspace (Weston, GStreamer, the vendor drivers above).
   modelled functionally.
 - Real device models for everything boot/display/audio/camera/USB/M33 exercise:
   LPUART, CCM, ANATOP, MEDIAMIX (blk-ctrl GPR + SRC power slice), PXP, ELE MU,
-  MU1, LPI2C + PMICs, GPIO, uSDHC, FEC + eQOS, eDMA3/4, LCDIFv3 + DSI + ADV7535,
+  MU1, LPI2C + PMICs, GPIO, uSDHC, FEC + eQOS, eDMA1/2, LCDIFv3 + DSI + ADV7535,
   SAI/MICFIL/WM8962, MT9M114 + parallel-CSI + ISI, ChipIdea USB, FlexCAN, and
   virtio-mmio for input. Everything else is a logging stub.
 - The NXP BSP uses its **downstream `drm/imx` drivers** (`DRM_IMX_LCDIFV3`,
@@ -404,7 +406,7 @@ behaviour.
 | `hw/gpio/imx93_gpio.c`      | GPIO controllers |
 | `hw/net/imx93_dwmac.c`      | eQOS dwmac4 Ethernet (from scratch) |
 | `hw/net/can/flexcan.c`      | FlexCAN controller (QEMU CAN bus) |
-| `hw/dma/imx93_edma.c`       | eDMA3 / eDMA4 controller (one-shot TCD execution + cyclic/scatter-gather for audio) |
+| `hw/dma/imx93_edma.c`       | eDMA1 / eDMA2 controllers (edma3-gen + edma4-gen IP); one-shot TCD execution + cyclic/scatter-gather for audio |
 | `hw/display/imx93_lcdif.c`  | LCDIFv3 display controller + framebuffer scanout |
 | `hw/display/imx93_dsi.c`    | MIPI-DSI host (dw-mipi-dsi core) |
 | `hw/display/imx93_isi.c`    | ISI image-sensing interface (V4L2 capture: ping-pong frame DMA + frame-done IRQ) |
@@ -501,7 +503,7 @@ BSP.
   resolves); LPI2C + PMIC (PCA9451A) + PCAL6524 → live FEC DHCP; a from-scratch
   eQOS/dwmac4 → second NIC (`eth1`) DHCP.
 - **GPIO + PMIC** — GPIO controllers and PMIC vsel presets for a clean probe.
-- **Display** — LCDIFv3 + dw-mipi-dsi + ADV7535 + MEDIAMIX + eDMA3 → real
+- **Display** — LCDIFv3 + dw-mipi-dsi + ADV7535 + MEDIAMIX + eDMA1 → real
   1920×1080 HDMI scanout of the framebuffer; the dual-A55 SMP Tux logos.
 - **Interactive login + input** — serial + HDMI-framebuffer login; virtio-mmio
   + virtio-keyboard/tablet so you can type in the QEMU window onto the display.
@@ -531,7 +533,7 @@ BSP.
 - **Functional capture, playback & expandability** — the **camera** path now
   delivers real V4L2 frames (ISI ping-pong DMA + frame-done IRQ; a media-ctl-in-C
   oracle streams 5/5 byte-checked frames). **SAI3 audio playback** moves real PCM
-  (SAI-drain-paced cyclic eDMA3 scatter-gather, gated on `TCD_CSR.ESG` so the
+  (SAI-drain-paced cyclic eDMA2 scatter-gather, gated on `TCD_CSR.ESG` so the
   one-shot path is untouched) and is capturable to a `.wav`. All **8 LPI2C** + 8
   LPSPI controllers are real and `-device`-attachable, and the **FlexIO** fabric
   runs as an extra I²C master (`-device tmp105,bus=flexio1-i2c,…`, byte-exact
