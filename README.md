@@ -330,6 +330,15 @@ To boot Linux to userspace you need three artifacts, all built from the
 The `tests/*/run.sh` scripts take `KERNEL=`, `DTB=`, `INITRD=` (and `QEMU=`)
 env vars and print exactly which to set if an artifact is missing.
 
+**Fully-OSS alternative (no NXP access required).** The machine also boots a
+**vanilla mainline kernel** — an `arm64 defconfig` build of upstream Linux
+(verified with 6.12.x) with the **mainline** `imx93-11x11-evk.dtb` (upstream
+since ~v6.3) and a small busybox initramfs reaches a shell on `ttyLP0` in
+seconds, with **zero NXP bits**. `tests/busybox-initramfs/build.sh` builds that
+OSS rootfs. This mainline tuple is the basis for the upstream functional test
+and a redistributable demo image; the NXP BSP is only needed for the *full* EVK
+userspace (Weston, GStreamer, the vendor drivers above).
+
 ## Known limitations
 
 - **`fsl-se … Failed to read tamper status` is benign.** The ELE itself
@@ -414,6 +423,8 @@ behaviour.
 | `tests/login-imx93/run.sh`  | interactive login on the emulated HDMI display |
 | `tests/weston-imx93/run.sh` | Weston/Wayland desktop on the emulated display |
 | `tests/gstreamer-imx93/run.sh` | GStreamer software media pipeline → waylandsink → display (no HW codec) |
+| `tests/lcd-panel/`, `tests/weston/`, `tests/busybox-initramfs/` | attach a prebuilt panel dtb + a pixman-rendered Weston desktop on a zero-NXP (mainline kernel + busybox) stack — demo / board-farm tooling |
+| `tests/soak/soak36.sh` | self-healing endurance soak: every datapath concurrent across many boot/power-off cycles (the 24h upstream-gate run) |
 | `tests/audio-imx93/run.sh`  | SAI3/WM8962 PCM playback (cyclic eDMA → FIFO; `WAV=` captures a .wav) |
 | `tests/camera-imx93/run.sh` | V4L2 camera capture (MT9M114 → CSI → ISI → real frames on `/dev/video0`) |
 | `tests/camera-imx93/csi-inject-test.sh` | virtual camera: feed host images via the ISI `frames=` source, byte-exact out of `/dev/video0` |
@@ -469,6 +480,15 @@ example — the HDMI pipeline *bound* but produced no modes; tracing it
 the i.MX LPI2C routes its EDID read through eDMA, which had to be modelled
 before the EDID could be read and a mode set.
 
+Validation is layered: kernel-free `qtest`s pin model behaviour (register/reset
+semantics and byte-exact data paths), the device models pass a clean
+**ASan + UBSan** sweep (zero undefined-behaviour), and a self-healing
+**24-hour soak** (`tests/soak/`) drives every datapath concurrently — audio,
+NPU, PXP, I3C, camera, display, storage, networking — across dozens of
+boot/power-off cycles as the comprehensive endurance gate before upstreaming.
+The model is also verified to boot a vanilla mainline kernel, not just the NXP
+BSP.
+
 ## Milestone history
 
 - **v0.0.1–0.0.3** — scaffold (real memory map from the DTS, GICv3, DDR,
@@ -518,6 +538,14 @@ before the EDID could be read and a mode set.
   round-trip) — each backed by a kernel-free qtest.
 - **Upstream-clean pass** — 0 checkpatch errors/warnings, MAINTAINERS entry,
   docs; tagged releases `imx93-v1.0`/`v1.1`/`v1.2`.
+- **Hardening & upstream prep** — adopted the upstream Cortex-M
+  `arm_cpu_has_work` halt-reason fix and kept the M33's PSCI
+  `power_state`/`halt_reason` consistent at its start/stop sites; verified the
+  machine boots a **vanilla mainline kernel** (zero-NXP `arm64 defconfig`), not
+  just the NXP BSP; added LCD-panel attach + a pixman Weston OSS-demo path; a
+  **24-hour comprehensive soak** (every datapath concurrent — audio/NPU/PXP/I3C/
+  camera/display/storage/net) ran with **0 incidents**, and the device models
+  are **ASan/UBSan-clean**. Tagged releases `imx93-v1.3` through `v1.5`.
 
 ## License & credits
 
