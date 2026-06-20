@@ -275,8 +275,8 @@ bool ethos_u_cmdstream_decode(const uint8_t *cms, uint32_t qsize,
             }
             break;
         case NPU_OP_DMA_START:
-            op.dma_src = resolve(basep, op.dma_src_region, op.dma_src);
-            op.dma_dst = resolve(basep, op.dma_dst_region, op.dma_dst);
+            op.dma_src_addr = resolve(basep, op.dma_src_region, op.dma_src);
+            op.dma_dst_addr = resolve(basep, op.dma_dst_region, op.dma_dst);
             if (handler) {
                 handler(ctx, opcode, &op);
             }

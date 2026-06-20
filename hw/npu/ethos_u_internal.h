@@ -192,9 +192,13 @@ typedef struct EthosUOpDesc {
     int32_t act_min, act_max;
     uint32_t act_type;
 
-    /* DMA */
+    /* DMA - dma_src/dma_dst are the raw (region-relative) registers; the
+     * resolved absolute addresses go in dma_src_addr/dma_dst_addr so the
+     * sticky raw values are never clobbered (a reused DMA reg must not be
+     * region-resolved twice). */
     int dma_src_region, dma_dst_region;
     uint32_t dma_src, dma_dst, dma_len;
+    uint64_t dma_src_addr, dma_dst_addr;
 } EthosUOpDesc;
 
 /*

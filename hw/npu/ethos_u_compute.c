@@ -273,6 +273,7 @@ static void ethos_u_exec_pool(EthosUState *s, const EthosUOpDesc *op)
     p.c = op->ifm_c;
     p.ofm_h = op->ofm_h;
     p.ofm_w = op->ofm_w;
+    p.ofm_c = op->ofm_c;
     p.kh = op->kh;
     p.kw = op->kw;
     p.stride_y = op->stride_y ? op->stride_y : 1;
@@ -294,7 +295,7 @@ void ethos_u_exec_op(void *ctx, uint16_t opcode, const EthosUOpDesc *op)
 
     switch (opcode) {
     case NPU_OP_DMA_START:
-        ethos_u_dma_copy(s, op->dma_dst, op->dma_src, op->dma_len);
+        ethos_u_dma_copy(s, op->dma_dst_addr, op->dma_src_addr, op->dma_len);
         break;
     case NPU_OP_CONV:
         ethos_u_exec_conv(s, op, false);

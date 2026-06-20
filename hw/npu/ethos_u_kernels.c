@@ -104,7 +104,7 @@ void ethos_u_pool_int8(int8_t *ofm, const int8_t *ifm, EthosUPoolType type,
 {
     for (int oy = 0; oy < p->ofm_h; oy++) {
         for (int ox = 0; ox < p->ofm_w; ox++) {
-            for (int c = 0; c < p->c; c++) {
+            for (int c = 0; c < p->ofm_c; c++) {
                 int32_t acc = (type == ETHOS_U_POOL_MAX) ? INT32_MIN : 0;
                 int count = 0;
 
@@ -136,7 +136,7 @@ void ethos_u_pool_int8(int8_t *ofm, const int8_t *ifm, EthosUPoolType type,
                     v = acc > 0 ? (acc + count / 2) / count
                                 : (acc - count / 2) / count;
                 }
-                ofm[(oy * p->ofm_w + ox) * p->c + c] =
+                ofm[(oy * p->ofm_w + ox) * p->ofm_c + c] =
                     sat_i8(v, p->act_min, p->act_max);
             }
         }

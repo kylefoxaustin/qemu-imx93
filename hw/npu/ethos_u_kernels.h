@@ -52,8 +52,8 @@ typedef enum {
 } EthosUPoolType;
 
 typedef struct EthosUPoolParams {
-    int ifm_h, ifm_w, c;
-    int ofm_h, ofm_w;
+    int ifm_h, ifm_w, c;        /* c = IFM channel count (read stride) */
+    int ofm_h, ofm_w, ofm_c;    /* ofm_c = OFM channel count (write stride/count) */
     int kh, kw;
     int stride_y, stride_x;
     int pad_top, pad_left;
