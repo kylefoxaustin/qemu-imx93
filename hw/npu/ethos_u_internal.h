@@ -160,6 +160,13 @@ typedef struct EthosUOpDesc {
     EthosULayout ifm_layout;
     int32_t pad_top, pad_left, pad_right, pad_bottom;
 
+    /* IFM2 (second elementwise input) */
+    uint32_t ifm2_base[4];
+    int32_t ifm2_stride_x, ifm2_stride_y, ifm2_stride_c;
+    int32_t ifm2_zp;
+    int ifm2_region;
+    uint64_t ifm2_addr;
+
     /* OFM */
     int32_t ofm_w, ofm_h, ofm_c;
     uint32_t ofm_base[4];
@@ -167,6 +174,15 @@ typedef struct EthosUOpDesc {
     int32_t ofm_zp;
     int ofm_region;
     EthosULayout ofm_layout;
+
+    /* elementwise scaling: OFM_SCALE (mul + add output), OPA/OPB_SCALE (add
+     * operands). Each is a Q31 multiplier + a (right) shift, gemmlowp style. */
+    int32_t ofm_scale, ofm_scale_shift;
+    int32_t opa_scale, opa_scale_shift;
+    int32_t opb_scale, opb_scale_shift;
+    /* elementwise add/sub: which operand is rescaled (0=none/same-scale,
+     * 1=OPa/ifm, 2=OPb/ifm2), from IFM_PRECISION bits [9:8]. */
+    int op_to_scale;
 
     /* kernel */
     int32_t kw, kh;

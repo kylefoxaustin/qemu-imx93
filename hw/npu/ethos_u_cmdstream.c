@@ -106,6 +106,31 @@ static void apply_set(EthosUOpDesc *op, bool payload, uint16_t opcode,
         case NPU_SET_SCALE_LENGTH:
             op->scale_len = v;
             break;
+        case NPU_SET_IFM2_BASE0:
+            op->ifm2_base[0] = v;
+            break;
+        case NPU_SET_IFM2_STRIDE_X:
+            op->ifm2_stride_x = v;
+            break;
+        case NPU_SET_IFM2_STRIDE_Y:
+            op->ifm2_stride_y = v;
+            break;
+        case NPU_SET_IFM2_STRIDE_C:
+            op->ifm2_stride_c = v;
+            break;
+        /* elementwise scale regs: payload = Q31 multiplier, imm = shift */
+        case NPU_SET_OFM_SCALE:
+            op->ofm_scale = v;
+            op->ofm_scale_shift = imm;
+            break;
+        case NPU_SET_OPA_SCALE:
+            op->opa_scale = v;
+            op->opa_scale_shift = imm;
+            break;
+        case NPU_SET_OPB_SCALE:
+            op->opb_scale = v;
+            op->opb_scale_shift = imm;
+            break;
         case NPU_SET_DMA0_SRC:
             op->dma_src = v;
             break;
@@ -143,6 +168,8 @@ static void apply_set(EthosUOpDesc *op, bool payload, uint16_t opcode,
         op->ifm_bitdepth = 8 << ((v >> 2) & 0x3);
         /* bit 0: 1 => signed (int8), 0 => unsigned (uint8) */
         op->ifm_unsigned = !(v & 0x1);
+        /* bits [9:8]: elementwise op_to_scale (0=none, 1=OPa, 2=OPb) */
+        op->op_to_scale = (v >> 8) & 0x3;
         break;
     case NPU_SET_IFM_ZERO_POINT:
         op->ifm_zp = (int16_t)v;
@@ -209,6 +236,12 @@ static void apply_set(EthosUOpDesc *op, bool payload, uint16_t opcode,
     case NPU_SET_DMA0_DST_REGION:
         op->dma_dst_region = v;
         break;
+    case NPU_SET_IFM2_ZERO_POINT:
+        op->ifm2_zp = (int16_t)v;
+        break;
+    case NPU_SET_IFM2_REGION:
+        op->ifm2_region = v;
+        break;
     default:
         break;
     }
@@ -271,6 +304,7 @@ bool ethos_u_cmdstream_decode(const uint8_t *cms, uint32_t qsize,
         case NPU_OP_ELEMENTWISE:
             op.ifm_addr = resolve(basep, op.ifm_region, op.ifm_base[0]);
             op.ofm_addr = resolve(basep, op.ofm_region, op.ofm_base[0]);
+            op.ifm2_addr = resolve(basep, op.ifm2_region, op.ifm2_base[0]);
             op.weight_addr = resolve(basep, op.weight_region, op.weight_base);
             op.scale_addr = resolve(basep, op.scale_region, op.scale_base);
             op.op_param = imm;

@@ -24,6 +24,7 @@
 #include "ethos_u_internal.h"
 #include "ethos_u_addr.h"
 #include "ethos_u_kernels.h"
+#include "ethos_u_requant.h"
 #include "ethos_u_weights.h"
 #include "system/dma.h"
 
@@ -325,6 +326,115 @@ static void ethos_u_exec_pool(EthosUState *s, const EthosUOpDesc *op)
                      op->ofm_stride_c, ofm);
 }
 
+/* Elementwise sub-type, from the NPU_OP_ELEMENTWISE immediate (elementwise_mode). */
+enum {
+    ETHOS_U_EW_MUL = 0,
+    ETHOS_U_EW_ADD = 1,
+    ETHOS_U_EW_SUB = 2,
+};
+
+/* Advanced (8-bit) add/sub scaling pre-shifts each operand into int32. */
+#define ETHOS_U_EW_LEFT_SHIFT 20
+
+static void ethos_u_exec_elementwise(EthosUState *s, const EthosUOpDesc *op)
+{
+    g_autofree int8_t *ifm = NULL;
+    g_autofree int8_t *ifm2 = NULL;
+    g_autofree int8_t *ofm = NULL;
+    int mode = op->op_param;
+    size_t n = (size_t)op->ofm_h * op->ofm_w * op->ofm_c;
+
+    if (mode != ETHOS_U_EW_MUL && mode != ETHOS_U_EW_ADD &&
+        mode != ETHOS_U_EW_SUB) {
+        return;     /* MIN/MAX/LRELU/ABS/CLZ/SHR/SHL not modelled yet */
+    }
+
+    ifm = ethos_u_load_fm(s, op->ifm_addr, op->ifm_layout, op->ifm_h,
+                          op->ifm_w, op->ifm_c, op->ifm_stride_y,
+                          op->ifm_stride_x, op->ifm_stride_c);
+    ifm2 = ethos_u_load_fm(s, op->ifm2_addr, op->ifm_layout, op->ifm_h,
+                           op->ifm_w, op->ifm_c, op->ifm2_stride_y,
+                           op->ifm2_stride_x, op->ifm2_stride_c);
+    if (!ifm || !ifm2) {
+        return;
+    }
+    /* unsigned (uint8): rebias both inputs to int8; zero-points shift -128. */
+    if (op->ifm_unsigned) {
+        for (size_t i = 0; i < n; i++) {
+            ifm[i] ^= (int8_t)0x80;
+            ifm2[i] ^= (int8_t)0x80;
+        }
+    }
+    ofm = g_new0(int8_t, n);
+
+    int in1_zp = op->ifm_zp - (op->ifm_unsigned ? 128 : 0);
+    int in2_zp = op->ifm2_zp - (op->ifm_unsigned ? 128 : 0);
+    int out_zp = op->ofm_zp - (op->ofm_unsigned ? 128 : 0);
+    int amin = op->act_min - (op->ofm_unsigned ? 128 : 0);
+    int amax = op->act_max - (op->ofm_unsigned ? 128 : 0);
+
+    /*
+     * The OFM/OPA/OPB_SCALE registers carry a Q31 multiplier and a full shift
+     * such that the result is round(x * mult >> shift). The gemmlowp kernels
+     * take a "vela shift" instead, where the >>31 of the doubling-high-mul is
+     * implicit; convert with (31 - register_shift), as the conv path does.
+     */
+    if (mode == ETHOS_U_EW_MUL) {
+        EthosUMulParams p = {
+            .n = n, .in1_zp = in1_zp, .in2_zp = in2_zp, .out_zp = out_zp,
+            .out_mult = op->ofm_scale, .out_shift = 31 - op->ofm_scale_shift,
+            .act_min = amin, .act_max = amax,
+        };
+        ethos_u_ew_mul_int8(ofm, ifm, ifm2, &p);
+    } else {
+        /*
+         * Add/Sub. Vela brings both operands to a common scale of
+         * 2*max_input_scale / 2^lsh (lsh = 20 for 8-bit). In the "advanced"
+         * case (opb_scale == 0) only the smaller-scaled operand, selected by
+         * op_to_scale (OPa=ifm, OPb=ifm2), is rescaled with OPA_SCALE; the
+         * larger one is exactly << (lsh-1) (its rescale is 2^(lsh-1)). In the
+         * "same scale" case both operands carry their own OPA/OPB multiplier
+         * with shift 0. The sum is then requantised by OFM_SCALE.
+         */
+        const int lsh = ETHOS_U_EW_LEFT_SHIFT;
+        bool sub = (mode == ETHOS_U_EW_SUB);
+        for (size_t i = 0; i < n; i++) {
+            int32_t a = (int32_t)ifm[i] - in1_zp;
+            int32_t b = (int32_t)ifm2[i] - in2_zp;
+            int32_t sa, sb;
+
+            if (op->opb_scale == 0) {
+                int32_t scaled = ethos_u_mul_by_quant_mult(
+                    (op->op_to_scale == 2) ? b : a, op->opa_scale,
+                    31 - op->opa_scale_shift);
+                int32_t plain = ((op->op_to_scale == 2) ? a : b) << (lsh - 1);
+                sa = (op->op_to_scale == 2) ? plain : scaled;
+                sb = (op->op_to_scale == 2) ? scaled : plain;
+            } else {
+                sa = ethos_u_mul_by_quant_mult(a << lsh, op->opa_scale,
+                                               31 - op->opa_scale_shift);
+                sb = ethos_u_mul_by_quant_mult(b << lsh, op->opb_scale,
+                                               31 - op->opb_scale_shift);
+            }
+            int32_t raw = sub ? sa - sb : sa + sb;
+            int32_t v = ethos_u_mul_by_quant_mult(raw, op->ofm_scale,
+                                                  31 - op->ofm_scale_shift);
+            v += out_zp;
+            v = v < amin ? amin : (v > amax ? amax : v);
+            ofm[i] = (int8_t)v;
+        }
+    }
+
+    if (op->ofm_unsigned) {
+        for (size_t i = 0; i < n; i++) {
+            ofm[i] ^= (int8_t)0x80;
+        }
+    }
+    ethos_u_store_fm(s, op->ofm_addr, op->ofm_layout, op->ofm_h, op->ofm_w,
+                     op->ofm_c, op->ofm_stride_y, op->ofm_stride_x,
+                     op->ofm_stride_c, ofm);
+}
+
 void ethos_u_exec_op(void *ctx, uint16_t opcode, const EthosUOpDesc *op)
 {
     EthosUState *s = ctx;
@@ -343,7 +453,7 @@ void ethos_u_exec_op(void *ctx, uint16_t opcode, const EthosUOpDesc *op)
         ethos_u_exec_pool(s, op);
         break;
     case NPU_OP_ELEMENTWISE:
-        /* Elementwise wiring (scale registers + IFM2) is a later step. */
+        ethos_u_exec_elementwise(s, op);
         break;
     default:
         break;
