@@ -112,9 +112,14 @@ static void ethos_u_store_fm(EthosUState *s, uint64_t addr,
     }
 }
 
-/* Decode the Vela weight stream into an OHWI int8 volume. */
-static int8_t *ethos_u_load_weights(EthosUState *s, const EthosUOpDesc *op,
-                                    bool depthwise)
+/*
+ * Decode the Vela weight stream into an OHWI int16 volume. Weights are kept
+ * 16-bit: uint8 (legacy) models recentre weights by the weight zero-point,
+ * producing 9-bit-signed values (e.g. [-151,104]) that would wrap if truncated
+ * to int8. For int8 models the values are in [-127,127] and int16 is exact too.
+ */
+static int16_t *ethos_u_load_weights(EthosUState *s, const EthosUOpDesc *op,
+                                     bool depthwise)
 {
     int ofm_c = op->ofm_c;
     int ifm_c = depthwise ? 1 : op->ifm_c;
@@ -122,8 +127,7 @@ static int8_t *ethos_u_load_weights(EthosUState *s, const EthosUOpDesc *op,
     int bitdepth = op->ifm_bitdepth ? op->ifm_bitdepth : 8;
     g_autofree uint8_t *enc = NULL;
     g_autofree int16_t *flat = NULL;
-    g_autofree int16_t *ohwi16 = NULL;
-    int8_t *ohwi8;
+    int16_t *ohwi16;
     int n_flat;
 
     EthosUWeightParams wp = {
@@ -156,13 +160,10 @@ static int8_t *ethos_u_load_weights(EthosUState *s, const EthosUOpDesc *op,
     }
     ohwi16 = g_new0(int16_t, n_ohwi);
     if (ethos_u_weights_reorder_inverse(ohwi16, flat, n_flat, &wp) < 0) {
+        g_free(ohwi16);
         return NULL;
     }
-    ohwi8 = g_malloc(n_ohwi);
-    for (size_t i = 0; i < n_ohwi; i++) {
-        ohwi8[i] = (int8_t)ohwi16[i];
-    }
-    return ohwi8;
+    return ohwi16;
 }
 
 /* Read @n per-channel 10-byte scale/bias records from the scale stream. */
@@ -203,17 +204,22 @@ static void ethos_u_conv_params(EthosUConvParams *p, const EthosUOpDesc *op)
     p->dilation_x = op->dilation_x ? op->dilation_x : 1;
     p->pad_top = op->pad_top;
     p->pad_left = op->pad_left;
-    p->ifm_zp = op->ifm_zp;
-    p->ofm_zp = op->ofm_zp;
-    p->act_min = op->act_min;
-    p->act_max = op->act_max;
+    /*
+     * uint8 (unsigned) activations are rebiased to int8 by XOR 0x80 in
+     * load/store; shift the matching zero-points and clamps by -128 so the
+     * int8 kernels compute the identical result. int8 path: offsets are 0.
+     */
+    p->ifm_zp = op->ifm_zp - (op->ifm_unsigned ? 128 : 0);
+    p->ofm_zp = op->ofm_zp - (op->ofm_unsigned ? 128 : 0);
+    p->act_min = op->act_min - (op->ofm_unsigned ? 128 : 0);
+    p->act_max = op->act_max - (op->ofm_unsigned ? 128 : 0);
 }
 
 static void ethos_u_exec_conv(EthosUState *s, const EthosUOpDesc *op,
                               bool depthwise)
 {
     g_autofree int8_t *ifm = NULL;
-    g_autofree int8_t *ohwi = NULL;
+    g_autofree int16_t *ohwi = NULL;
     g_autofree int8_t *ofm = NULL;
     g_autofree EthosUScaleBias *sb = NULL;
     EthosUConvParams p;
@@ -226,13 +232,21 @@ static void ethos_u_exec_conv(EthosUState *s, const EthosUOpDesc *op,
     if (!ifm || !ohwi || !sb) {
         return;
     }
+    /* unsigned (uint8) IFM: rebias each byte to int8 (XOR 0x80) so the
+     * int8 kernels apply (see ethos_u_conv_params zero-point shift). */
+    if (op->ifm_unsigned) {
+        size_t nin = (size_t)op->ifm_h * op->ifm_w * op->ifm_c;
+        for (size_t i = 0; i < nin; i++) {
+            ifm[i] ^= (int8_t)0x80;
+        }
+    }
     ofm = g_new0(int8_t, (size_t)op->ofm_h * op->ofm_w * op->ofm_c);
     ethos_u_conv_params(&p, op);
 
     if (depthwise) {
         /* OHWI (ifm_depth 1) -> HWC the depthwise kernel expects. */
-        g_autofree int8_t *hwc =
-            g_new0(int8_t, (size_t)op->kh * op->kw * op->ofm_c);
+        g_autofree int16_t *hwc =
+            g_new0(int16_t, (size_t)op->kh * op->kw * op->ofm_c);
         for (int c = 0; c < op->ofm_c; c++) {
             for (int ky = 0; ky < op->kh; ky++) {
                 for (int kx = 0; kx < op->kw; kx++) {
@@ -246,6 +260,13 @@ static void ethos_u_exec_conv(EthosUState *s, const EthosUOpDesc *op,
         ethos_u_conv2d_int8(ofm, ifm, ohwi, sb, &p);
     }
 
+    /* unsigned (uint8) OFM: rebias the int8 result back to uint8 (XOR 0x80). */
+    if (op->ofm_unsigned) {
+        size_t nout = (size_t)op->ofm_h * op->ofm_w * op->ofm_c;
+        for (size_t i = 0; i < nout; i++) {
+            ofm[i] ^= (int8_t)0x80;
+        }
+    }
     ethos_u_store_fm(s, op->ofm_addr, op->ofm_layout, op->ofm_h, op->ofm_w,
                      op->ofm_c, op->ofm_stride_y, op->ofm_stride_x,
                      op->ofm_stride_c, ofm);
@@ -266,6 +287,14 @@ static void ethos_u_exec_pool(EthosUState *s, const EthosUOpDesc *op)
     if (!ifm) {
         return;
     }
+    /* unsigned (uint8) IFM: rebias to int8 (XOR 0x80). Pooling preserves the
+     * quant params (out == in), so the rebias cancels on store. */
+    if (op->ifm_unsigned) {
+        size_t nin = (size_t)op->ifm_h * op->ifm_w * op->ifm_c;
+        for (size_t i = 0; i < nin; i++) {
+            ifm[i] ^= (int8_t)0x80;
+        }
+    }
     ofm = g_new0(int8_t, (size_t)op->ofm_h * op->ofm_w * op->ofm_c);
 
     p.ifm_h = op->ifm_h;
@@ -280,10 +309,17 @@ static void ethos_u_exec_pool(EthosUState *s, const EthosUOpDesc *op)
     p.stride_x = op->stride_x ? op->stride_x : 1;
     p.pad_top = op->pad_top;
     p.pad_left = op->pad_left;
-    p.act_min = op->act_min;
-    p.act_max = op->act_max;
+    p.act_min = op->act_min - (op->ofm_unsigned ? 128 : 0);
+    p.act_max = op->act_max - (op->ofm_unsigned ? 128 : 0);
 
     ethos_u_pool_int8(ofm, ifm, type, &p);
+    /* unsigned (uint8) OFM: rebias the int8 result back to uint8. */
+    if (op->ofm_unsigned) {
+        size_t nout = (size_t)op->ofm_h * op->ofm_w * op->ofm_c;
+        for (size_t i = 0; i < nout; i++) {
+            ofm[i] ^= (int8_t)0x80;
+        }
+    }
     ethos_u_store_fm(s, op->ofm_addr, op->ofm_layout, op->ofm_h, op->ofm_w,
                      op->ofm_c, op->ofm_stride_y, op->ofm_stride_x,
                      op->ofm_stride_c, ofm);

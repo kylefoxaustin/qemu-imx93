@@ -176,6 +176,10 @@ typedef struct EthosUOpDesc {
     /* block config / precision (needed to invert the weight reorder) */
     int32_t ofm_block_depth;
     int ifm_bitdepth;       /* 8 or 16 */
+    /* PRECISION bit 6 selects signed (int8); clear => unsigned (uint8). The
+     * compute path rebiases unsigned activations to int8 (XOR 0x80) so the
+     * int8 kernels apply unchanged. */
+    bool ifm_unsigned, ofm_unsigned;
 
     /* immediate param of the executing NPU_OP_* (e.g. pooling mode) */
     uint16_t op_param;

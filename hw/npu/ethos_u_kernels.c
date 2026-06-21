@@ -22,7 +22,7 @@ static inline int8_t sat_i8(int32_t v, int act_min, int act_max)
 }
 
 void ethos_u_conv2d_int8(int8_t *ofm, const int8_t *ifm,
-                         const int8_t *weights, const EthosUScaleBias *sb,
+                         const int16_t *weights, const EthosUScaleBias *sb,
                          const EthosUConvParams *p)
 {
     for (int oy = 0; oy < p->ofm_h; oy++) {
@@ -44,7 +44,7 @@ void ethos_u_conv2d_int8(int8_t *ofm, const int8_t *ifm,
                         }
                         const int8_t *ip = ifm
                             + (iy * p->ifm_w + ix) * p->ifm_c;
-                        const int8_t *wp = weights
+                        const int16_t *wp = weights
                             + ((oc * p->kh + ky) * p->kw + kx) * p->ifm_c;
                         for (int ic = 0; ic < p->ifm_c; ic++) {
                             acc += (int32_t)(ip[ic] - p->ifm_zp) * wp[ic];
@@ -63,7 +63,7 @@ void ethos_u_conv2d_int8(int8_t *ofm, const int8_t *ifm,
 }
 
 void ethos_u_depthwise_int8(int8_t *ofm, const int8_t *ifm,
-                            const int8_t *weights, const EthosUScaleBias *sb,
+                            const int16_t *weights, const EthosUScaleBias *sb,
                             const EthosUConvParams *p)
 {
     for (int oy = 0; oy < p->ofm_h; oy++) {
@@ -84,7 +84,7 @@ void ethos_u_depthwise_int8(int8_t *ofm, const int8_t *ifm,
                             continue;
                         }
                         int8_t in = ifm[(iy * p->ifm_w + ix) * p->ifm_c + c];
-                        int8_t w = weights[(ky * p->kw + kx) * p->ofm_c + c];
+                        int16_t w = weights[(ky * p->kw + kx) * p->ofm_c + c];
                         acc += (int32_t)(in - p->ifm_zp) * w;
                     }
                 }

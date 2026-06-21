@@ -33,17 +33,20 @@ typedef struct EthosUConvParams {
  * int8 2-D convolution. @ifm is NHWC [ifm_h*ifm_w*ifm_c], @weights is OHWI
  * [ofm_c*kh*kw*ifm_c], @sb is per-OFM-channel scale/bias; writes @ofm NHWC
  * [ofm_h*ofm_w*ofm_c]. Filter zero point is 0 (symmetric per-channel weights).
+ * Weights are int16: uint8 (legacy) models recentre by the weight zero-point,
+ * yielding 9-bit-signed values (e.g. [-151,104]) that do not fit int8.
  */
 void ethos_u_conv2d_int8(int8_t *ofm, const int8_t *ifm,
-                         const int8_t *weights, const EthosUScaleBias *sb,
+                         const int16_t *weights, const EthosUScaleBias *sb,
                          const EthosUConvParams *p);
 
 /*
  * int8 depthwise convolution, depth multiplier 1 (ifm_c == ofm_c). @weights is
- * HWC [kh*kw*ofm_c] (TFLite depthwise filter layout [1,kh,kw,C]).
+ * HWC [kh*kw*ofm_c] (TFLite depthwise filter layout [1,kh,kw,C]), int16 (see
+ * ethos_u_conv2d_int8 on the 9-bit-signed weight range for uint8 models).
  */
 void ethos_u_depthwise_int8(int8_t *ofm, const int8_t *ifm,
-                            const int8_t *weights, const EthosUScaleBias *sb,
+                            const int16_t *weights, const EthosUScaleBias *sb,
                             const EthosUConvParams *p);
 
 typedef enum {
