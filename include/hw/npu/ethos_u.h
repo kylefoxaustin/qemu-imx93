@@ -51,6 +51,11 @@ struct EthosUState {
     /* APB register file (ID/STATUS/CMD/RESET/QBASE/QSIZE/QREAD/BASEPx/...). */
     uint32_t regs[ETHOS_U_NUM_REGS];
 
+    /* Activation lookup table (exp/reciprocal for softmax etc.), 256 entries,
+     * loaded by a DMA into the on-chip LUT slot before a TABLE activation. */
+    uint32_t lut[256];
+    bool lut_loaded;
+
     bool busy;                  /* a command stream is executing */
 };
 

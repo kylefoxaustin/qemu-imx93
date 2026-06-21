@@ -199,6 +199,8 @@ static void apply_set(EthosUOpDesc *op, bool payload, uint16_t opcode,
         op->ofm_layout = precision_layout(v);
         /* bit 0: 1 => signed (int8), 0 => unsigned (uint8) */
         op->ofm_unsigned = !(v & 0x1);
+        /* OFM activation_precision at bits [2:1]: 0=>8-bit, 1=>16, 2=>32 */
+        op->ofm_bitdepth = 8 << ((v >> 1) & 0x3);
         break;
     case NPU_SET_OFM_ZERO_POINT:
         op->ofm_zp = (int16_t)v;
@@ -235,6 +237,12 @@ static void apply_set(EthosUOpDesc *op, bool payload, uint16_t opcode,
         break;
     case NPU_SET_DMA0_DST_REGION:
         op->dma_dst_region = v;
+        break;
+    case NPU_SET_IFM2_BROADCAST:
+        op->ifm2_broadcast = v;
+        break;
+    case NPU_SET_IFM2_SCALAR:
+        op->ifm2_scalar = (int32_t)v;
         break;
     case NPU_SET_IFM2_ZERO_POINT:
         op->ifm2_zp = (int16_t)v;

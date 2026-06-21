@@ -100,6 +100,8 @@ typedef enum {
     NPU_SET_DMA0_SRC_REGION  = 0x130,
     NPU_SET_DMA0_DST_REGION  = 0x131,
 
+    NPU_SET_IFM2_BROADCAST   = 0x180,
+    NPU_SET_IFM2_SCALAR      = 0x181,
     NPU_SET_IFM2_ZERO_POINT  = 0x189,
     NPU_SET_IFM2_REGION      = 0x18f,
 } EthosUCmd0;
@@ -166,6 +168,10 @@ typedef struct EthosUOpDesc {
     int32_t ifm2_zp;
     int ifm2_region;
     uint64_t ifm2_addr;
+    /* IFM2 broadcast control (NPU_SET_IFM2_BROADCAST): bit0/1/2 broadcast
+     * H/W/C, bit6 reverse operands, bit7 use the scalar register below. */
+    uint32_t ifm2_broadcast;
+    int32_t ifm2_scalar;
 
     /* OFM */
     int32_t ofm_w, ofm_h, ofm_c;
@@ -191,7 +197,8 @@ typedef struct EthosUOpDesc {
 
     /* block config / precision (needed to invert the weight reorder) */
     int32_t ofm_block_depth;
-    int ifm_bitdepth;       /* 8 or 16 */
+    int ifm_bitdepth;       /* 8, 16 or 32 */
+    int ofm_bitdepth;       /* 8, 16 or 32 */
     /* PRECISION bit 6 selects signed (int8); clear => unsigned (uint8). The
      * compute path rebiases unsigned activations to int8 (XOR 0x80) so the
      * int8 kernels apply unchanged. */
