@@ -99,6 +99,93 @@ void ethos_u_depthwise_int8(int8_t *ofm, const int8_t *ifm,
     }
 }
 
+static inline int32_t sat_i32_range(int64_t v, int act_min, int act_max)
+{
+    if (v < act_min) {
+        v = act_min;
+    } else if (v > act_max) {
+        v = act_max;
+    }
+    return (int32_t)v;
+}
+
+/*
+ * int32-output convolution / depthwise: write the raw post-bias accumulator
+ * (no OFM requant, no output zero-point), clamped to the activation range.
+ * Vela lowers global average pooling to a depthwise that sums the window into
+ * an int32 OFM, then a separate elementwise multiply applies 1/N; the int8
+ * kernels above would requantise and truncate that sum to a byte.
+ */
+void ethos_u_conv2d_int32(int32_t *ofm, const int8_t *ifm,
+                          const int16_t *weights, const EthosUScaleBias *sb,
+                          const EthosUConvParams *p)
+{
+    for (int oy = 0; oy < p->ofm_h; oy++) {
+        for (int ox = 0; ox < p->ofm_w; ox++) {
+            for (int oc = 0; oc < p->ofm_c; oc++) {
+                int64_t acc = sb[oc].bias;
+
+                for (int ky = 0; ky < p->kh; ky++) {
+                    int iy = oy * p->stride_y - p->pad_top
+                             + ky * p->dilation_y;
+                    if (iy < 0 || iy >= p->ifm_h) {
+                        continue;
+                    }
+                    for (int kx = 0; kx < p->kw; kx++) {
+                        int ix = ox * p->stride_x - p->pad_left
+                                 + kx * p->dilation_x;
+                        if (ix < 0 || ix >= p->ifm_w) {
+                            continue;
+                        }
+                        const int8_t *ip = ifm
+                            + (iy * p->ifm_w + ix) * p->ifm_c;
+                        const int16_t *wp = weights
+                            + ((oc * p->kh + ky) * p->kw + kx) * p->ifm_c;
+                        for (int ic = 0; ic < p->ifm_c; ic++) {
+                            acc += (int32_t)(ip[ic] - p->ifm_zp) * wp[ic];
+                        }
+                    }
+                }
+                ofm[(oy * p->ofm_w + ox) * p->ofm_c + oc] =
+                    sat_i32_range(acc, p->act_min, p->act_max);
+            }
+        }
+    }
+}
+
+void ethos_u_depthwise_int32(int32_t *ofm, const int8_t *ifm,
+                             const int16_t *weights, const EthosUScaleBias *sb,
+                             const EthosUConvParams *p)
+{
+    for (int oy = 0; oy < p->ofm_h; oy++) {
+        for (int ox = 0; ox < p->ofm_w; ox++) {
+            for (int c = 0; c < p->ofm_c; c++) {
+                int64_t acc = sb[c].bias;
+
+                for (int ky = 0; ky < p->kh; ky++) {
+                    int iy = oy * p->stride_y - p->pad_top
+                             + ky * p->dilation_y;
+                    if (iy < 0 || iy >= p->ifm_h) {
+                        continue;
+                    }
+                    for (int kx = 0; kx < p->kw; kx++) {
+                        int ix = ox * p->stride_x - p->pad_left
+                                 + kx * p->dilation_x;
+                        if (ix < 0 || ix >= p->ifm_w) {
+                            continue;
+                        }
+                        int8_t in = ifm[(iy * p->ifm_w + ix) * p->ifm_c + c];
+                        int16_t w = weights[(ky * p->kw + kx) * p->ofm_c + c];
+                        acc += (int32_t)(in - p->ifm_zp) * w;
+                    }
+                }
+                ofm[(oy * p->ofm_w + ox) * p->ofm_c + c] =
+                    sat_i32_range(acc, p->act_min, p->act_max);
+            }
+        }
+    }
+}
+
 void ethos_u_pool_int8(int8_t *ofm, const int8_t *ifm, EthosUPoolType type,
                        const EthosUPoolParams *p)
 {

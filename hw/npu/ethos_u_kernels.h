@@ -49,6 +49,20 @@ void ethos_u_depthwise_int8(int8_t *ofm, const int8_t *ifm,
                             const int16_t *weights, const EthosUScaleBias *sb,
                             const EthosUConvParams *p);
 
+/*
+ * int32-output convolution / depthwise: the raw post-bias accumulator clamped
+ * to [act_min, act_max], with no OFM requant or output zero point. Used for the
+ * sum stage of a Vela-lowered reduction (e.g. global average pool = depthwise
+ * sum to int32 OFM, then an elementwise 1/N multiply).
+ */
+void ethos_u_conv2d_int32(int32_t *ofm, const int8_t *ifm,
+                          const int16_t *weights, const EthosUScaleBias *sb,
+                          const EthosUConvParams *p);
+
+void ethos_u_depthwise_int32(int32_t *ofm, const int8_t *ifm,
+                             const int16_t *weights, const EthosUScaleBias *sb,
+                             const EthosUConvParams *p);
+
 typedef enum {
     ETHOS_U_POOL_MAX,
     ETHOS_U_POOL_AVG,

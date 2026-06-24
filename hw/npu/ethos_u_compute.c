@@ -330,13 +330,12 @@ static void ethos_u_exec_conv(EthosUState *s, const EthosUOpDesc *op,
             ifm[i] ^= (int8_t)0x80;
         }
     }
-    ofm = g_new0(int8_t, (size_t)op->ofm_h * op->ofm_w * op->ofm_c);
     ethos_u_conv_params(&p, op);
 
+    /* Depthwise wants its OHWI (ifm_depth 1) kernel as HWC. */
+    g_autofree int16_t *hwc = NULL;
     if (depthwise) {
-        /* OHWI (ifm_depth 1) -> HWC the depthwise kernel expects. */
-        g_autofree int16_t *hwc =
-            g_new0(int16_t, (size_t)op->kh * op->kw * op->ofm_c);
+        hwc = g_new0(int16_t, (size_t)op->kh * op->kw * op->ofm_c);
         for (int c = 0; c < op->ofm_c; c++) {
             for (int ky = 0; ky < op->kh; ky++) {
                 for (int kx = 0; kx < op->kw; kx++) {
@@ -345,6 +344,32 @@ static void ethos_u_exec_conv(EthosUState *s, const EthosUOpDesc *op,
                 }
             }
         }
+    }
+
+    /*
+     * int32 (or int16) OFM: Vela's reduction sum stage (global average pool
+     * lowered as a depthwise that sums the window) wants the raw accumulator,
+     * not a requantised byte. Emit it via the typed store; a later elementwise
+     * op applies the 1/N multiply.
+     */
+    if (op->ofm_bitdepth > 8) {
+        int elem_out = op->ofm_bitdepth / 8;
+        g_autofree int32_t *ofm32 =
+            g_new0(int32_t, (size_t)op->ofm_h * op->ofm_w * op->ofm_c);
+        if (depthwise) {
+            ethos_u_depthwise_int32(ofm32, ifm, hwc, sb, &p);
+        } else {
+            ethos_u_conv2d_int32(ofm32, ifm, ohwi, sb, &p);
+        }
+        ethos_u_store_fm_typed(s, op->ofm_addr, op->ofm_layout, op->ofm_h,
+                               op->ofm_w, op->ofm_c, op->ofm_stride_y,
+                               op->ofm_stride_x, op->ofm_stride_c, elem_out,
+                               ofm32);
+        return;
+    }
+
+    ofm = g_new0(int8_t, (size_t)op->ofm_h * op->ofm_w * op->ofm_c);
+    if (depthwise) {
         ethos_u_depthwise_int8(ofm, ifm, hwc, sb, &p);
     } else {
         ethos_u_conv2d_int8(ofm, ifm, ohwi, sb, &p);
