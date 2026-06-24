@@ -383,7 +383,8 @@ static void ethos_u_exec_pool_wide(EthosUState *s, const EthosUOpDesc *op)
     }
     bool explicit_shift = (op->ofm_scale == 1);
     bool requant = !explicit_shift && op->ofm_scale != 0 &&
-                   !(op->ofm_scale == (1 << 30) && op->ofm_scale_shift == 30);
+                   !(op->ofm_scale == (1 << 30) &&
+                     (op->ofm_scale_shift == 30 || op->ofm_scale_shift == 31));
     ofm = g_new0(int32_t, (size_t)op->ofm_h * op->ofm_w);
     for (int y = 0; y < op->ofm_h; y++) {
         for (int x = 0; x < op->ofm_w; x++) {
@@ -593,12 +594,19 @@ static void ethos_u_exec_elementwise_wide(EthosUState *s,
     /*
      * OFM_SCALE encoding for these ops: a value of 1 means "explicit scaling"
      * (the result is arithmetic-shifted right by ofm_scale_shift, rounded);
-     * 2^30 with shift 30 is the no_scale identity; any other value is a Q31
+     * 2^30 is the no_scale identity for the gemmlowp SRDHM domain - the
+     * command-stream encodes it with shift 31 (M0=2^30 in Q0.31 == unit), so a
+     * MUL there is a bare SaturatingRoundingDoublingHighMul with no post-scale.
+     * Vela's lowered softmax reciprocal (gemmlowp one_over_one_plus_x) relies on
+     * this: applying a spurious requant >>1 to each FixedPoint multiply halves
+     * the result. shift 30 is also accepted as identity (mul_by_quant_mult by
+     * 2^30 with shift arg 1 is itself a no-op). Any other value is a real Q31
      * gemmlowp multiplier.
      */
     bool explicit_shift = (op->ofm_scale == 1);
     bool requant = !explicit_shift && op->ofm_scale != 0 &&
-                   !(op->ofm_scale == (1 << 30) && op->ofm_scale_shift == 30);
+                   !(op->ofm_scale == (1 << 30) &&
+                     (op->ofm_scale_shift == 30 || op->ofm_scale_shift == 31));
 
     ofm = g_new0(int32_t, n);
     for (size_t i = 0; i < n; i++) {
