@@ -53,6 +53,8 @@ qemu = subprocess.Popen([
     "-kernel", KERNEL, "-dtb", DTB,
     "-drive", f"if=sd,file={WIC},format=raw",
     "-append", "console=ttyLP0,115200 root=/dev/mmcblk0p2 rootwait rw cpuidle.off=1",
+    # user-net backs the real FEC (eth0); the eQOS stub (eth1) has no peer.
+    "-nic", "user",
     "-fsdev", f"local,id=fs0,path={OVERLAY},security_model=none",
     "-device", "virtio-9p-device,fsdev=fs0,mount_tag=overlay",
     "-serial", f"unix:{SER},server,nowait", "-serial", "null",
@@ -67,19 +69,26 @@ def conn(path, tries=80):
         except OSError: time.sleep(0.5)
     raise RuntimeError("connect timeout " + path)
 
-ser = conn(SER); ser.settimeout(1.0); buf = ""
-def pump():
+import select
+ser = conn(SER); ser.setblocking(False); buf = ""
+def pump():                         # non-blocking drain of whatever's arrived
     global buf
-    try:
-        while True:
-            d = ser.recv(65536)
-            if not d: break
-            buf += d.decode(errors="replace")
-    except socket.timeout: pass
+    while True:
+        r, _, _ = select.select([ser], [], [], 0)
+        if not r: break
+        try: d = ser.recv(65536)
+        except (BlockingIOError, InterruptedError): break
+        if not d: break
+        buf += d.decode(errors="replace")
+def _send(b):                       # send fully, waiting for writability (no fixed timeout)
+    while b:
+        select.select([], [ser], [], 5)
+        try: b = b[ser.send(b):]
+        except (BlockingIOError, InterruptedError): pass
 def typed(s):                       # char-by-char: a whole-line write doubles chars
     for ch in s:
-        ser.sendall(ch.encode()); time.sleep(0.012)
-    ser.sendall(b"\n"); time.sleep(0.3)
+        _send(ch.encode()); time.sleep(0.012)
+    _send(b"\n"); time.sleep(0.3)
 def wait_for(pat, timeout):
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -168,6 +177,9 @@ try:
         except Exception: final[f] = 0
     for k, v in final.items():
         print(f"  {k:10} = {v}", flush=True)
+    try: npath = open(OVERLAY + "/net_path").read().strip()
+    except OSError: npath = "?"
+    print(f"  net path   = {npath} (fec = real imx.enet, not loopback)", flush=True)
     print(f"  screendump(best-effort): {samples} samples, {live_samples} live, "
           f"{black_samples} black", flush=True)
     for k in ("disp", "npu", "cpu1", "cpu2", "sd", "net"):

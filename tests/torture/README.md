@@ -18,7 +18,7 @@ compute.
 | Audio (4x eDMA) | wm8962/SAI3 play + capture, SPDIF (XCVR), MICFIL PDM capture  |
 | CPU             | niced `dd`/`md5sum` loops on both A55s                        |
 | Storage         | `dd` + `sync` + `md5` write/verify on the SD rootfs (uSDHC)   |
-| Network         | ping over the user-net gateway (loopback fallback)           |
+| Network         | real FEC (`imx.enet`) traffic to the user-net gateway        |
 
 ## How it works (sudo-free)
 

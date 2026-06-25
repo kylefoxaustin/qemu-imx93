@@ -58,8 +58,11 @@ log "cpu niced"
     md5sum /root/tort.dat >/dev/null 2>&1; rm -f /root/tort.dat; n=$((n+1)); echo $n > $P/sd; done ) &
 log "sd $!"
 
-# 5. Network - IP stack via the qemu user gateway (best-effort).
-( n=0; while :; do ping -c 30 -i 0.02 10.0.2.2 >/dev/null 2>&1 || ping -c 30 -i 0.02 127.0.0.1 >/dev/null 2>&1
+# 5. Network - real FEC traffic to the slirp gateway (large packets push TX/RX
+# buffer descriptors + DMA through imx.enet); loopback only if the FEC is down.
+( n=0; while :; do
+    if ping -c 50 -i 0.01 -s 1400 10.0.2.2 >/dev/null 2>&1; then echo fec > $OV/net_path
+    else ping -c 50 -i 0.01 127.0.0.1 >/dev/null 2>&1; echo loopback > $OV/net_path; fi
     n=$((n+1)); echo $n > $P/net; done ) &
 log "net $!"
 
