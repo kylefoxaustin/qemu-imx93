@@ -245,6 +245,9 @@ enum FslImx93MemoryRegions {
     FSL_IMX93_BLK_CTRL_WAKEUPMIX,
     FSL_IMX93_BLK_CTRL_DDRMIX,
 
+    /* DDR controller register block (stubbed; the EDAC driver probes it) */
+    FSL_IMX93_DDRC,
+
     /* Ethernet: FEC (modeled) + eQOS dwmac (stubbed - no upstream model) */
     FSL_IMX93_FEC,
     FSL_IMX93_EQOS,

@@ -83,6 +83,7 @@ static const struct {
     [FSL_IMX93_BLK_CTRL_AONMIX] = { 0x44210000, 4 * KiB, "aonmix-blk-ctrl" },
     [FSL_IMX93_BLK_CTRL_WAKEUPMIX] = { 0x42420000, 4 * KiB, "wakeupmix-blk" },
     [FSL_IMX93_BLK_CTRL_DDRMIX] = { 0x4e010000, 64 * KiB, "ddrmix-blk-ctrl" },
+    [FSL_IMX93_DDRC] = { 0x4e300000, 8 * KiB, "ddrc" },
 
     /* Ethernet: FEC (real imx.enet) + eQOS dwmac (stub). */
     [FSL_IMX93_FEC] = { 0x42890000, 64 * KiB, "fec" },
@@ -197,6 +198,7 @@ static void fsl_imx93_install_unimplemented(FslImx93State *s)
         FSL_IMX93_IOMUXC, FSL_IMX93_SRC,
         FSL_IMX93_BLK_CTRL_AONMIX, FSL_IMX93_BLK_CTRL_WAKEUPMIX,
         FSL_IMX93_BLK_CTRL_DDRMIX,
+        FSL_IMX93_DDRC,
         FSL_IMX93_TRDC,
         FSL_IMX93_MIPI_CSI,
         FSL_IMX93_I3C2,
