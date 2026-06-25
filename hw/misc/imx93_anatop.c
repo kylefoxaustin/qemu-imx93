@@ -32,8 +32,10 @@
 #define ANATOP_PLL_STRIDE   0x100
 
 /* Per-PLL register offsets. */
+#define PLL_NUMERATOR_OFFSET 0x40
 #define PLL_STATUS_OFFSET   0xF0
 #define PLL_LOCK_STATUS     (1u << 0)
+#define PLL_MFN_MASK        0xfffffffcu     /* MFN field, bits 31:2 */
 
 static bool anatop_is_pll_status(hwaddr offset)
 {
@@ -46,8 +48,14 @@ static uint64_t imx93_anatop_read(void *opaque, hwaddr offset, unsigned size)
     IMX93AnatopState *s = opaque;
 
     if (anatop_is_pll_status(offset)) {
-        /* PLL is always locked in this model. */
-        return s->regs[offset / 4] | PLL_LOCK_STATUS;
+        /*
+         * PLL is always locked in this model. Hardware also mirrors the
+         * written PLL_NUMERATOR MFN (bits 31:2) into PLL_STATUS; the
+         * clk-fracn-gppll driver reads it back to verify set_rate (and WARNs
+         * on a mismatch), so reflect the same PLL block's numerator here.
+         */
+        hwaddr num = offset - PLL_STATUS_OFFSET + PLL_NUMERATOR_OFFSET;
+        return PLL_LOCK_STATUS | (s->regs[num / 4] & PLL_MFN_MASK);
     }
     return s->regs[offset / 4];
 }
