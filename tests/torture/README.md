@@ -68,15 +68,29 @@ Prints a per-datapath summary and `RESULT: PASS/FAIL`. Screendumps land in
 
 - **Ethos-U M33 boot under the desktop.** The eIQ delegate boots the Cortex-M33
   on `/dev/ethosu0` open, and that M33 / ethos-firmware rpmsg bring-up is a
-  known load-sensitive *guest-side* race (the same one that hangs the trivial
-  synthetic micro-ops). On the `core-image-weston` desktop it intermittently
-  RCU-stalls *during the M33 boot* and wedges the entire guest - it happens even
-  with the M33 booted first in calm (no other load, FEC link down), so it isn't
-  fixable by staging or by quieting the rest of the machine, and it isn't a QEMU
-  bug. Because a lost boot takes down the whole guest (not just the NPU), the
-  NPU is left out of this concurrent set entirely; it's exercised standalone by
-  `tests/ethosu-infer` / `tests/ethosu-rpmsg`, where the M33 boots reliably on
-  the lighter `core-image` initramfs.
+  *guest-side* race (the same one that hangs the trivial synthetic micro-ops).
+  Root-caused via two controlled `core-image` reproducers (direct `/dev/ethosu0`
+  ioctls survive heavy load; the eIQ delegate Oopses) to **two distinct NXP BSP
+  defects**, neither a QEMU bug:
+    1. *eIQ delegate (userspace):* fires the `VERSION_REQUEST` ioctl before the
+       rpmsg name-service announce has allocated the `rpmsg-ethosu-channel`
+       endpoint - an ordering bug.
+    2. *NXP `ethosu` kernel driver:* `ethosu_rpmsg_version_request` then
+       dereferences the not-yet-ready endpoint and **Oopses**
+       (`Internal error: 96000004`) where it should return `-EAGAIN`/`-ENODEV` -
+       a userspace ordering mistake should never be able to panic the kernel.
+       The Oops leaves imx-rproc half-torn-down, so the next boot's vdevbuffer
+       carveout alloc fails (`-12`) and cascades; on the weston desktop the
+       downstream symptom is an RCU stall that wedges the whole guest.
+  The QEMU MU/rpmsg model is faithful (it delivers the announce and the ioctl
+  exactly as the driver sequences them). Cross-validated on the bus against a
+  Qualcomm/Hexagon session: their fastrpc path is immune by construction because
+  `remote_handle_open()` is a *synchronous* RPC ("readiness IS the return of
+  open()") - the invariant the NXP rpmsg path lacks. Because a lost boot takes
+  down the whole guest (not just the NPU), the NPU is left out of this concurrent
+  set entirely; it's exercised standalone by `tests/ethosu-infer` /
+  `tests/ethosu-rpmsg`, where the M33 boots reliably on the lighter `core-image`
+  initramfs.
 
 - **FEC link up + M33 boot.** Backing the FEC with `-nic user` makes the above
   M33-boot wedge fire much more readily (the active link concurrent with the
