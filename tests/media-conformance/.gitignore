@@ -1,0 +1,3 @@
+# cross-built conformance binaries + their build trees (see build-tools.sh)
+/bin/
+/.build/
