@@ -1,0 +1,186 @@
+# i.MX 93 test/result matrix — SOURCE ANNOTATION (human-authored)
+#
+# This file holds the parts CI cannot infer: the fidelity TIER of each IP block,
+# the human-readable evidence, the caveats, and the not-present (N/A) list.
+# The factual pass/fail comes from the test harness, not from here.
+#
+# `docs/validation/gen-matrix.py` merges this file with a meson testlog
+# (meson-logs/testlog.json) to render test-result-matrix.md. Edit THIS file (or
+# the tests); never hand-edit the generated matrix.
+#
+# tests: list of meson test basenames that back a row. The generator stamps the
+# Status column from their results and flags any that have gone MISSING (a
+# renamed/removed test = drift). A row with no `tests:` is evidence-only and its
+# Status comes from `result:` (for non-meson harnesses: soak, media, torture,
+# functional boot, usbredir) — clearly marked as attested, not CI-stamped.
+
+meta:
+  soc: "i.MX 93"
+  machine: "imx93-11x11-evk"
+  branch: "imx93-dev"
+
+tiers:
+  A: "Data path verified — real data/compute flows through the block and is checked against a golden or reference (end-to-end in-guest and/or qtest with golden output)."
+  B: "Driver bring-up — the stock BSP Linux driver probes and operates the block (registers, IRQs, basic transactions); correct for bring-up but no golden-verified host data path. QEMU's usual peripheral convention."
+  C: "Registration / stub — present so Linux enumerates it and does not fault; minimal or no functional behaviour."
+  "N/A": "Not present on i.MX 93 (documented so the absence is not mistaken for a gap)."
+
+harnesses:
+  - harness: "Unit (pure logic)"
+    location: "tests/unit/test-ethos-u-{cmdstream,mlw,kernels,requant}"
+    scope: "NPU decoder / weight (mlw) / int8 kernels / requant, host-only"
+    tests: [test-ethos-u-cmdstream, test-ethos-u-mlw, test-ethos-u-kernels, test-ethos-u-requant]
+  - harness: "qtest (device)"
+    location: "tests/qtest/ethos-u-test, imx93-*-test"
+    scope: "MMIO-level device behaviour, golden compares"
+    tests: [ethos-u-test, imx93-pxp-test, imx93-isi-test, imx93-sai-test, imx93-lpi2c-test, imx93-lpspi-test, imx93-flexio-test, imx93-flexspi-test]
+  - harness: "Functional (boot)"
+    location: "upstream/test_imx93_evk.py (staged for upstream)"
+    scope: "Boot stock BSP Linux to userspace"
+    result: "PASS (attested)"
+  - harness: "Media conformance"
+    location: "tests/media-conformance/"
+    scope: "v4l2-compliance (ISI), modetest (LCDIF/KMS)"
+    result: "36 PASS / 0 FAIL / 26 SKIP (attested)"
+  - harness: "Torture / concurrency"
+    location: "tests/torture/"
+    scope: "Live desktop while NPU/CPU/storage/net hammer"
+    result: "0 oops / 0 wedge (attested)"
+  - harness: "Soak"
+    location: "(run log)"
+    scope: "24 h comprehensive, all datapaths concurrent"
+    result: "PASS 2026-06-13 — 11 cycles, 61 boots, 0 incidents, RSS flat (attested)"
+  - harness: "Inter-QEMU USB (M1)"
+    location: "tests/usbredir-imx93/ (host end)"
+    scope: "usb-redir host wire handshake (imx93 host <-> MCX device)"
+    result: "PASS — host-end hello live; full enumeration pending MCX pairing (attested)"
+
+groups:
+  - name: "Compute / boot core"
+    rows:
+      - block: "Dual Cortex-A55 SMP"
+        tier: A
+        evidence: "Boots stock BSP Linux to userspace, SMP"
+        notes: "Not cycle-accurate"
+      - block: "Cortex-M33 + RPMsg (MU)"
+        tier: A
+        evidence: "Real NXP firmware boots; A55<->M33 RPMsg live"
+        notes: "Concurrent M33 boot can wedge the desktop guest — NXP BSP defects, not the model"
+      - block: "eDMA1 / eDMA2"
+        tier: A
+        evidence: "Drives SAI audio (cyclic, drain-paced); live"
+      - block: "CCM / ANATOP / SRC / power"
+        tier: B
+        evidence: "Linux programs clocks/PLLs/resets directly (no System Manager)"
+        notes: "The defining i.MX93-vs-95 difference — modelled, not SCMI-stubbed"
+      - block: "OCOTP / ELE / BBNSM / SEMA42"
+        tier: B
+        evidence: "Driver probe + mailbox / register transactions"
+        notes: "EdgeLock Enclave mailbox functional"
+      - block: "SYSCTR / TSTMR / TPM / WDOG / TMU"
+        tier: B
+        evidence: "Timers/thermal/watchdog driver bring-up"
+
+  - name: "Networking / storage"
+    rows:
+      - block: "FEC (imx_fec)"
+        tier: A
+        evidence: "Real traffic + DHCP; torture drives live FEC"
+      - block: "eQOS (dwmac)"
+        tier: A
+        evidence: "Real traffic + DHCP"
+      - block: "uSDHC (SD/eMMC)"
+        tier: A
+        evidence: "Boots rootfs from SD"
+      - block: "USB (Chipidea host)"
+        tier: B
+        evidence: "Real USB devices enumerate in-guest; usb-redir host wire live (M1)"
+        notes: "Enumeration data path proven; inter-QEMU link is mission #5 M1"
+
+  - name: "Display / graphics / camera / audio"
+    rows:
+      - block: "LCDIFv3 -> MIPI-DSI -> ADV7535 -> HDMI"
+        tier: A
+        evidence: "Pixels scanned out 1920x1080; modetest 7 formats + pageflip + SMPTE screendump"
+        notes: "Login/typeable console; Weston desktop"
+      - block: "Media Block Control"
+        tier: B
+        evidence: "Display/camera muxing for the above"
+      - block: "PXP (G2D 2D engine)"
+        tier: A
+        evidence: "copy/fill/blit/blend/rotate byte-exact (qtest + e2e); Weston composites through PXP"
+        tests: [imx93-pxp-test]
+        notes: "scale + CSC not modelled — libg2d/pxp_dma_v3 stack limit, not a model gap"
+      - block: "ISI + MIPI-CSI + MT9M114 / OV5640"
+        tier: A
+        evidence: "Real V4L2 frames to /dev/video0; v4l2-compliance 48/48 ioctl + 55/55 streaming"
+        tests: [imx93-isi-test]
+      - block: "SAI3 + WM8962 codec"
+        tier: A
+        evidence: "Real PCM playback + WAV capture (-audio driver=wav)"
+        tests: [imx93-sai-test]
+        notes: "SAI access width pinned to 16-bit for eDMA S16 writes"
+      - block: "MICFIL (PDM mic) / XCVR"
+        tier: B
+        evidence: "Driver bring-up"
+
+  - name: "Accelerator (NPU)"
+    rows:
+      - block: "Ethos-U65 microNPU"
+        tier: A
+        evidence: "uint8 MobileNet end-to-end via eIQ delegate, argmax == host; bit-exact int8 across real CNNs; qtest conv golden + honest-fault; unit tests (mlw/kernels/requant/cmdstream)"
+        tests: [ethos-u-test, test-ethos-u-cmdstream, test-ethos-u-mlw, test-ethos-u-kernels, test-ethos-u-requant]
+        notes: "Opt-in honest-fault (see fidelity-audit.md); mlw decoder Apache-2.0 (upstream blocker, NPU-only); nasnet +/-1 residual capped"
+
+  - name: "Expansion buses (developer-attachable)"
+    rows:
+      - block: "LPI2C x8"
+        tier: B
+        evidence: "qtest; -device bus=lpi2cN attachable"
+        tests: [imx93-lpi2c-test]
+      - block: "LPSPI x8"
+        tier: B
+        evidence: "qtest"
+        tests: [imx93-lpspi-test]
+      - block: "LPUART x8"
+        tier: A
+        evidence: "Serial console"
+      - block: "FlexIO"
+        tier: B
+        evidence: "qtest (I2C master)"
+        tests: [imx93-flexio-test]
+      - block: "FlexSPI"
+        tier: B
+        evidence: "qtest (NOR bring-up)"
+        tests: [imx93-flexspi-test]
+      - block: "FlexCAN / CAN bus"
+        tier: B
+        evidence: "Driver bring-up, can-bus connectable"
+      - block: "GPIO / PMIC"
+        tier: B
+        evidence: "Poweroff, GPIO-idle-HIGH; PMIC over I2C"
+      - block: "ADC"
+        tier: B
+        evidence: "Driver bring-up"
+
+na:
+  - block: "System Manager / SCMI"
+    why: "i.MX93 has none — Linux programs CCM/ANATOP/SRC directly (vs i.MX95)"
+  - block: "Hardware JPEG (CAST)"
+    why: "i.MX95-only block; JPEG on i.MX93 is software"
+  - block: "GPU (compute)"
+    why: "No emulatable GPU compute; Linux sees the node but 3D is not executed"
+
+caveats:
+  - area: "M33 concurrent boot"
+    boundary: "Booting the M33 while the desktop guest runs can wedge the guest"
+    disposition: "Two NXP BSP defects, documented in tests/torture/; not a model bug"
+  - area: "PXP G2D"
+    boundary: "scale + CSC not modelled"
+    disposition: "libg2d/pxp_dma_v3 vendor stack rejects the op; copy/fill/blit/blend/rotate byte-exact"
+  - area: "NPU mlw decoder"
+    boundary: "hw/npu/mlw is Apache-2.0"
+    disposition: "Upstream-licensing blocker for the NPU only; does not block the core machine"
+  - area: "NPU nasnet"
+    boundary: "+/-1-rounding accumulation, occasional argmax flip on the deepest degenerate-int8 model"
+    disposition: "Isolation-blocked and capped; all real trained workloads tested are bit-exact"
