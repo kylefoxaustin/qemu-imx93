@@ -115,6 +115,10 @@ The per-device tags under **What runs today** make this split explicit.
 Stock **NXP Linux 6.12.49** boots to userspace (PID 1) on both Cortex-A55
 cores, on the **stock `imx93-11x11-evk` device tree — no DT modifications**.
 
+> **At a glance:** [`TEST_MATRIX.md`](TEST_MATRIX.md) is the per-IP-block
+> test/result matrix (fidelity tier + evidence for every block, plus the test
+> harnesses and their results). The prose below expands on it.
+
 Each device below is tagged **functional** (the host driver's data path runs
 end to end — data actually moves) or **brings up** (the driver binds and the
 device registers / enumerates — the registration bar, no working host data path
