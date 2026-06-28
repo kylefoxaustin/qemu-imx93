@@ -77,7 +77,12 @@ bool ethos_u_cmdstream_run(EthosUState *s, hwaddr qbase, uint32_t qsize)
         basep[i] = ethos_u_region_base(s, i);
     }
 
-    return ethos_u_cmdstream_decode(cms, qsize, basep, ethos_u_exec_op, s);
+    /* Cleared here, set by the executor on an uncomputable op (honest_fault). */
+    s->op_failed = false;
+    if (!ethos_u_cmdstream_decode(cms, qsize, basep, ethos_u_exec_op, s)) {
+        return false;
+    }
+    return !s->op_failed;
 }
 
 /* A single in-flight job (snapshot taken at kick time). */
@@ -252,6 +257,7 @@ static const Property ethos_u_properties[] = {
     DEFINE_PROP_UINT8("macs", EthosUState, macs_per_cc_log2, 8),
     DEFINE_PROP_BOOL("host-infer-fallback", EthosUState,
                      host_infer_fallback, false),
+    DEFINE_PROP_BOOL("honest-fault", EthosUState, honest_fault, false),
     DEFINE_PROP_LINK("dma", EthosUState, dma_mr, TYPE_MEMORY_REGION,
                      MemoryRegion *),
 };

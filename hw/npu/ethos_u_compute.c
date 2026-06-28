@@ -665,7 +665,11 @@ static void ethos_u_exec_elementwise_wide(EthosUState *s,
             v = a ? __builtin_clz((uint32_t)a) : 32;
             break;
         default:
+            /* Unmodelled elementwise mode: zero-fill, or honest-fault if opted in. */
             v = 0;
+            if (s->honest_fault) {
+                s->op_failed = true;
+            }
             break;
         }
 
@@ -744,7 +748,12 @@ static void ethos_u_exec_elementwise(EthosUState *s, const EthosUOpDesc *op)
 
     if (mode != ETHOS_U_EW_MUL && mode != ETHOS_U_EW_ADD &&
         mode != ETHOS_U_EW_SUB) {
-        return;     /* MIN/MAX/LRELU/ABS not modelled yet */
+        /* MIN/MAX/LRELU/ABS not modelled yet: leave OFM untouched, or
+         * honest-fault the run if the operator opted in. */
+        if (s->honest_fault) {
+            s->op_failed = true;
+        }
+        return;
     }
 
     ifm = ethos_u_load_fm(s, op->ifm_addr, op->ifm_layout, op->ifm_h,
@@ -872,6 +881,10 @@ void ethos_u_exec_op(void *ctx, uint16_t opcode, const EthosUOpDesc *op)
         ethos_u_exec_elementwise(s, op);
         break;
     default:
+        /* Unimplemented opcode: honest-fault the run if the operator opted in. */
+        if (s->honest_fault) {
+            s->op_failed = true;
+        }
         break;
     }
 }

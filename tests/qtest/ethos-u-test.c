@@ -92,9 +92,71 @@ static void test_conv(void)
     qtest_quit(qts);
 }
 
+/*
+ * Run a command stream carrying an opcode the model does not implement (0x004,
+ * a cmd0 op that is neither a known NPU_OP_* nor a register write), followed by
+ * STOP, and return the completion STATUS. With honest-fault disabled the engine
+ * silently no-ops the unknown op and completes clean; with it enabled the run
+ * fails and STATUS reports the parse-error bit. Either way it must complete (an
+ * unsupported op never wedges the engine - the IRQ is always raised).
+ */
+static uint32_t run_unsupported_op(QTestState *qts)
+{
+    /* cmd0 words are <16-bit code LE><16-bit imm LE>; 0x004 is unallocated. */
+    static const uint8_t cms[] = {
+        0x04, 0x00, 0x00, 0x00,   /* unknown opcode 0x004 */
+        0x00, 0x00, 0x00, 0x00,   /* NPU_OP_STOP */
+    };
+    uint32_t status = 0;
+    int i;
+
+    qtest_memwrite(qts, CMS_BASE_ADDR, cms, sizeof(cms));
+    npu_writel(qts, REG_QBASE, (uint32_t)CMS_BASE_ADDR);
+    npu_writel(qts, REG_QBASE_HI, (uint32_t)(CMS_BASE_ADDR >> 32));
+    npu_writel(qts, REG_QSIZE, sizeof(cms));
+    npu_writel(qts, REG_CMD, CMD_RUN);
+
+    for (i = 0; i < 10000; i++) {
+        status = qtest_readl(qts, NPU_BASE + REG_STATUS);
+        if (status & STATUS_IRQ) {
+            break;
+        }
+        g_usleep(1000);
+    }
+    return status;
+}
+
+/* Default: unsupported op is silently tolerated, run completes without error. */
+static void test_unsupported_lenient(void)
+{
+    QTestState *qts = qtest_init("-machine imx93-11x11-evk -display none");
+    uint32_t status = run_unsupported_op(qts);
+
+    g_assert_cmphex(status & STATUS_IRQ, ==, STATUS_IRQ);
+    g_assert_cmphex(status & STATUS_END, ==, STATUS_END);
+    g_assert_cmphex(status & STATUS_PARSE_ERR, ==, 0);
+    qtest_quit(qts);
+}
+
+/* Opt-in: the same stream honest-faults - completes (no wedge) but flags error. */
+static void test_unsupported_honest_fault(void)
+{
+    QTestState *qts = qtest_init(
+        "-machine imx93-11x11-evk -display none "
+        "-global driver=arm.ethos-u,property=honest-fault,value=on");
+    uint32_t status = run_unsupported_op(qts);
+
+    g_assert_cmphex(status & STATUS_IRQ, ==, STATUS_IRQ);
+    g_assert_cmphex(status & STATUS_PARSE_ERR, ==, STATUS_PARSE_ERR);
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
     qtest_add_func("/ethos-u/conv", test_conv);
+    qtest_add_func("/ethos-u/unsupported-lenient", test_unsupported_lenient);
+    qtest_add_func("/ethos-u/unsupported-honest-fault",
+                   test_unsupported_honest_fault);
     return g_test_run();
 }

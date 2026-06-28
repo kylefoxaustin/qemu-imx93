@@ -47,6 +47,14 @@ struct EthosUState {
     EthosUVariant variant;
     uint8_t macs_per_cc_log2;   /* CONFIG[3:0]; 8 => 2^8 = 256 MACs/cc */
     bool host_infer_fallback;   /* opt-in: defer to a host helper (debug) */
+    /*
+     * Opt-in honest fault: when an operation cannot be computed faithfully (an
+     * unknown opcode or an unsupported sub-op), fail the run so completion
+     * reports an error in STATUS instead of silently emitting wrong/zero output.
+     * Default false preserves the lenient no-op behaviour (every passing model
+     * is unaffected). Mirrors the i.MX95 Neutron opt-in fault property.
+     */
+    bool honest_fault;
 
     /* APB register file (ID/STATUS/CMD/RESET/QBASE/QSIZE/QREAD/BASEPx/...). */
     uint32_t regs[ETHOS_U_NUM_REGS];
@@ -57,6 +65,12 @@ struct EthosUState {
     bool lut_loaded;
 
     bool busy;                  /* a command stream is executing */
+    /*
+     * Set by the executor (worker thread) when honest_fault is enabled and an
+     * op could not be computed; consumed by ethos_u_cmdstream_run() to fail the
+     * job. Single in-flight job (guarded by @busy) so no locking is needed.
+     */
+    bool op_failed;
 };
 
 #endif /* HW_NPU_ETHOS_U_H */

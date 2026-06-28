@@ -328,6 +328,14 @@ bool ethos_u_cmdstream_decode(const uint8_t *cms, uint32_t qsize,
             }
             break;
         default:
+            /*
+             * An opcode the model does not implement. The stream is still well
+             * framed, so parsing continues; forward it to the handler so the
+             * device layer can honest-fault on it (or ignore it) per policy.
+             */
+            if (handler) {
+                handler(ctx, opcode, &op);
+            }
             break;
         }
     }
