@@ -1128,11 +1128,16 @@ static void qemu_chr_socket_connected(QIOTask *task, void *opaque)
 
     if (qio_task_propagate_error(task, &err)) {
         tcp_chr_change_state(s, TCP_CHARDEV_STATE_DISCONNECTED);
-        if (s->registered_yank) {
-            yank_unregister_function(CHARDEV_YANK_INSTANCE(chr->label),
-                                     char_socket_yank_iochannel,
-                                     QIO_CHANNEL(sioc));
-        }
+        /*
+         * The yank function is registered (against the connected channel) only
+         * on a *successful* connect, in tcp_chr_new_client() below. A failed
+         * connect attempt never registered this sioc, so there is nothing to
+         * unregister here - and yank_unregister_function() aborts() when asked
+         * to remove a function it cannot find. Unregistering of a previously
+         * connected channel is handled by the disconnect path. (A reconnecting
+         * client whose attempt errors - e.g. a flapping peer - otherwise
+         * crashes QEMU here.)
+         */
         check_report_connect_error(chr, err);
         goto cleanup;
     }

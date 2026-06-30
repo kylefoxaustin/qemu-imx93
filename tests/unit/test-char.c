@@ -1370,6 +1370,71 @@ static void char_socket_client_dupid_test(gconstpointer opaque)
     g_free(optstr);
 }
 
+/*
+ * Regression test for the yank-unregister-on-failed-connect abort: a client
+ * chardev whose async connect attempt fails must not abort() (the real-world
+ * trigger was a reconnecting client against a flapping peer, but a single
+ * failed connect hits the identical code path).
+ * The connect-error path used to call yank_unregister_function() for the
+ * failed channel, but yank is registered (per channel) only on a *successful*
+ * connect - so the failed channel was never registered and
+ * yank_unregister_function() abort()ed when it could not find it. A flapping
+ * peer (e.g. a usbredir device server that drops) thus crashed QEMU.
+ */
+static void char_socket_client_reconnect_fail_test(gconstpointer opaque)
+{
+    const CharSocketClientTestConfig *config = opaque;
+    QIOChannelSocket *ioc;
+    SocketAddress *addr;
+    char *optstr;
+    Chardev *chr;
+    QemuOpts *opts;
+    int i;
+
+    /*
+     * Bind a listener only to reserve a real address, then close it so the
+     * client's connect attempts are refused and the connect-error path runs.
+     */
+    ioc = qio_channel_socket_new();
+    g_assert_nonnull(ioc);
+    qio_channel_socket_listen_sync(ioc, config->addr, 1, &error_abort);
+    addr = qio_channel_socket_get_local_address(ioc, &error_abort);
+    g_assert_nonnull(addr);
+    object_unref(OBJECT(ioc));
+
+    /*
+     * A reconnecting client so the connect is async (creation succeeds and the
+     * failure is delivered to qemu_chr_socket_connected, the bug site). The
+     * retry interval is set far in the future so the timer never refires during
+     * the test, and a unique id keeps the (intentionally leaked) yank instance
+     * from colliding with the other client tests that all use "cdev0".
+     */
+    g_assert_cmpint(addr->type, ==, SOCKET_ADDRESS_TYPE_INET);
+    optstr = g_strdup_printf(
+        "socket,id=cdevyank,host=%s,port=%s,reconnect-ms=3600000",
+        addr->u.inet.host, addr->u.inet.port);
+    opts = qemu_opts_parse_noisily(qemu_find_opts("chardev"), optstr, true);
+    g_assert_nonnull(opts);
+    chr = qemu_chr_new_from_opts(opts, NULL, &error_abort);
+    g_assert_nonnull(chr);
+
+    /*
+     * Dispatch the failing connect attempt (nonblocking, so we never wait on
+     * the far-future retry timer). Pre-fix this aborted in
+     * yank_unregister_function() via the connect-error path; reaching the end
+     * of the loop without abort()ing is the pass.
+     */
+    for (i = 0; i < 200; i++) {
+        main_loop_wait(true);
+        g_usleep(1000);
+    }
+
+    object_unparent(OBJECT(chr));
+    qemu_opts_del(opts);
+    qapi_free_SocketAddress(addr);
+    g_free(optstr);
+}
+
 static void char_socket_client_test(gconstpointer opaque)
 {
     const CharSocketClientTestConfig *config = opaque;
@@ -1978,6 +2043,10 @@ int main(int argc, char **argv)
     if (has_ipv4) {
         SOCKET_SERVER_TEST(tcp, &tcpaddr);
         SOCKET_CLIENT_TEST(tcp, &tcpaddr);
+        /* Registered once (TCP only); exercises the connect-error yank path. */
+        g_test_add_data_func("/char/socket/client/connect-fail-yank",
+                             &client1tcp,
+                             char_socket_client_reconnect_fail_test);
     }
 #ifndef WIN32
     SOCKET_SERVER_TEST(unix, &unixaddr);
