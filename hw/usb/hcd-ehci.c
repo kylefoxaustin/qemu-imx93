@@ -935,9 +935,37 @@ static uint64_t ehci_port_read(void *ptr, hwaddr addr,
 {
     EHCIState *s = ptr;
     uint32_t val;
+    int port = addr >> 2;
 
-    val = s->portsc[addr >> 2];
-    trace_usb_ehci_portsc_read(addr + s->portscbase, addr >> 2, val);
+    val = s->portsc[port];
+
+    /*
+     * Synthesize the TDI/ChipIdea PORTSC.PSPD speed field on read for
+     * controllers that report it (the value is derived from the attached
+     * device, not stored). Without this an i.MX ci_hdrc host reads PSPD=0
+     * and enumerates every device as full-speed.
+     */
+    if (s->report_pspd) {
+        uint32_t pspd = PORTSC_PSPD_FULL;
+        USBDevice *dev = s->ports[port].dev;
+
+        if (dev && dev->attached) {
+            switch (dev->speed) {
+            case USB_SPEED_LOW:
+                pspd = PORTSC_PSPD_LOW;
+                break;
+            case USB_SPEED_HIGH:
+                pspd = PORTSC_PSPD_HIGH;
+                break;
+            default:
+                pspd = PORTSC_PSPD_FULL;
+                break;
+            }
+        }
+        val = (val & ~PORTSC_PSPD) | (pspd << PORTSC_PSPD_SH);
+    }
+
+    trace_usb_ehci_portsc_read(addr + s->portscbase, port, val);
     return val;
 }
 

@@ -95,6 +95,13 @@ static void chipidea_init(Object *obj)
     ChipideaState *ci = CHIPIDEA(obj);
     int i;
 
+    /*
+     * ChipIdea reports the negotiated device speed in PORTSC.PSPD [27:26];
+     * the i.MX ci_hdrc driver reads it to set the device speed, so without
+     * this a high-speed device would enumerate as full-speed.
+     */
+    ehci->report_pspd = true;
+
     for (i = 0; i < ARRAY_SIZE(ci->iomem); i++) {
         const struct {
             const char *name;

@@ -58,6 +58,18 @@
  */
 #define PORTSC_RO_MASK       0x007001c0
 #define PORTSC_RWC_MASK      0x0000002a
+/*
+ * Port Speed [27:26]: a TDI/ChipIdea extension (reserved in standard EHCI)
+ * that reports the negotiated device speed (0=full, 1=low, 2=high). The
+ * i.MX ci_hdrc host driver reads it to set the device speed, so a host that
+ * leaves it 0 enumerates every device as full-speed. Only reported when the
+ * controller sets EHCIState::report_pspd (see hw/usb/chipidea.c).
+ */
+#define PORTSC_PSPD          (3 << 26)    // Port Speed (TDI/ChipIdea)
+#define PORTSC_PSPD_SH       26           // Port Speed shift
+#define PORTSC_PSPD_FULL     0
+#define PORTSC_PSPD_LOW      1
+#define PORTSC_PSPD_HIGH     2
 #define PORTSC_WKOC_E        (1 << 22)    // Wake on Over Current Enable
 #define PORTSC_WKDS_E        (1 << 21)    // Wake on Disconnect Enable
 #define PORTSC_WKCN_E        (1 << 20)    // Wake on Connect Enable

@@ -249,6 +249,12 @@ struct EHCIState {
     MemoryRegion mem_ports;
     int companion_count;
     bool companion_enable;
+    /*
+     * Report the attached device's speed in the PORTSC PSPD field [27:26]
+     * (a TDI/ChipIdea extension). Set by controllers whose driver relies on
+     * it (i.MX ci_hdrc); off for standard EHCI, which has no PSPD field.
+     */
+    bool report_pspd;
     uint16_t capsbase;
     uint16_t opregbase;
     uint16_t portscbase;
