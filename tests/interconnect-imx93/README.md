@@ -9,9 +9,34 @@ the LPUART model and the LPUART2 address, so the links are host-agnostic across
 the i.MX 9 family.
 
 ```sh
+tests/interconnect-imx93/run-eth.sh     # two instances, FEC (eth0) <-> socket <-> FEC
 tests/interconnect-imx93/run-uart.sh    # two instances, LPUART2 <-> socket <-> LPUART2
 tests/interconnect-imx93/run-spi.sh     # two instances, LPSPI1 <-> spi-link <-> socket <-> LPSPI1
 ```
+
+## Ethernet link (`run-eth.sh`)
+
+Two i.MX 93 guests, each board's **FEC (eth0)** bridged by a QEMU socket netdev
+(`-nic socket,listen=` on the server, `-nic socket,connect=` on the client).
+Static IPs on eth0 (server `192.168.7.1`, client `192.168.7.2`); the second NIC
+(`-nic user` = eQOS/eth1) is unused.
+
+The oracle ([`linktool`](linktool.c), a static TCP echo tool) proves real data
+movement: the client sends a payload, the server echoes it back, the client
+verifies it **byte-exact** — so the payload actually traversed guest A → FEC →
+socket bridge → FEC → guest B and back:
+
+```
+LINK:PASS:server:echoed 40 bytes [IMX93-ETH-LINK-payload-0123456789-abcdef]
+LINK:PASS:client:echo byte-exact (40 bytes)
+PASS: payload crossed FEC<->socket<->FEC byte-exact between two i.MX 93 guests
+```
+
+The FEC (`imx.enet`) binds eth0 on the stock EVK dtb and needed no model changes.
+`linktool` avoids `getaddrinfo`/NSS (raw sockets + `inet_pton`) so it links
+`-static`, and the client retries `connect` for ~60 s to ride out boot/ARP
+warmup. Keep `MEM >= ~1 GiB` (`MEM=2G` default): the FEC's coherent DMA pool
+sits at a high physical address the smaller `-m` sizes don't cover.
 
 ## UART link (`run-uart.sh`)
 
