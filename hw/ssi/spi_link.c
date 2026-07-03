@@ -14,9 +14,17 @@
  * queued. So each direction is an independent, FIFO-buffered byte stream - one
  * side's master writes, the other's master clocks the bytes in. This models the
  * data path of a board-to-board SPI link (not cycle-accurate clock duplex).
+ *
+ * The MOSI write is NON-BLOCKING: outgoing bytes are queued in a tx FIFO and
+ * drained with qemu_chr_fe_write(); if the socket back-pressures (a continuous
+ * full-duplex clock can outrun a peer that isn't draining), a G_IO_OUT watch
+ * resumes the drain when it's writable - the vCPU is never blocked inside a TDR
+ * write. If the tx FIFO itself fills under sustained back-pressure, MOSI bytes
+ * are dropped (a link overrun, logged once) rather than hanging the guest.
  */
 #include "qemu/osdep.h"
 #include "qemu/fifo8.h"
+#include "qemu/log.h"
 #include "qemu/module.h"
 #include "hw/ssi/ssi.h"
 #include "hw/core/qdev-properties.h"
@@ -28,14 +36,49 @@
 #define TYPE_SPI_LINK "spi-link"
 OBJECT_DECLARE_SIMPLE_TYPE(SpiLinkState, SPI_LINK)
 
-#define SPI_LINK_FIFO_DEPTH 256
+#define SPI_LINK_RX_DEPTH 256
+#define SPI_LINK_TX_DEPTH 8192      /* absorbs MOSI bursts */
 
 struct SpiLinkState {
     SSIPeripheral parent_obj;
 
     CharFrontend chr;
-    Fifo8 rx;               /* bytes shifted in from the peer (MISO) */
+    Fifo8 rx;               /* bytes shifted in from the peer (MISO)   */
+    Fifo8 tx;               /* bytes to send to the peer (MOSI), async */
+    guint watch_tag;        /* G_IO_OUT drain watch, 0 = none pending  */
+    bool tx_overrun_warned;
 };
+
+static void spi_link_flush(SpiLinkState *s);
+
+static gboolean spi_link_watch(void *do_not_use, GIOCondition cond,
+                               void *opaque)
+{
+    SpiLinkState *s = opaque;
+
+    s->watch_tag = 0;
+    spi_link_flush(s);
+    return G_SOURCE_REMOVE;
+}
+
+/* Drain the tx FIFO without blocking; re-arm the watch on back-pressure. */
+static void spi_link_flush(SpiLinkState *s)
+{
+    while (!fifo8_is_empty(&s->tx)) {
+        uint8_t b = fifo8_peek(&s->tx);
+        int rc = qemu_chr_fe_write(&s->chr, &b, 1);
+
+        if (rc < 1) {
+            if (!s->watch_tag) {
+                s->watch_tag =
+                    qemu_chr_fe_add_watch(&s->chr, G_IO_OUT | G_IO_HUP,
+                                          spi_link_watch, s);
+            }
+            return;         /* resume from the watch when writable */
+        }
+        fifo8_pop(&s->tx);
+    }
+}
 
 static uint32_t spi_link_transfer(SSIPeripheral *dev, uint32_t val)
 {
@@ -43,8 +86,15 @@ static uint32_t spi_link_transfer(SSIPeripheral *dev, uint32_t val)
     uint8_t out = val & 0xff;
     uint8_t in = 0xff;      /* MISO idle-high when the peer sent nothing */
 
-    /* MOSI byte -> the peer instance over the chardev socket. */
-    qemu_chr_fe_write_all(&s->chr, &out, 1);
+    /* Queue the MOSI byte and drain non-blocking - never block the vCPU. */
+    if (!fifo8_is_full(&s->tx)) {
+        fifo8_push(&s->tx, out);
+    } else if (!s->tx_overrun_warned) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "spi-link: tx overrun (peer not draining), dropping MOSI\n");
+        s->tx_overrun_warned = true;
+    }
+    spi_link_flush(s);
 
     if (!fifo8_is_empty(&s->rx)) {
         in = fifo8_pop(&s->rx);
@@ -69,22 +119,42 @@ static void spi_link_receive(void *opaque, const uint8_t *buf, int size)
     }
 }
 
+static void spi_link_init(Object *obj)
+{
+    SpiLinkState *s = SPI_LINK(obj);
+
+    fifo8_create(&s->rx, SPI_LINK_RX_DEPTH);
+    fifo8_create(&s->tx, SPI_LINK_TX_DEPTH);
+}
+
+static void spi_link_finalize(Object *obj)
+{
+    SpiLinkState *s = SPI_LINK(obj);
+
+    if (s->watch_tag) {
+        g_source_remove(s->watch_tag);
+        s->watch_tag = 0;
+    }
+    fifo8_destroy(&s->tx);
+    fifo8_destroy(&s->rx);
+}
+
 static void spi_link_realize(SSIPeripheral *dev, Error **errp)
 {
     SpiLinkState *s = SPI_LINK(dev);
 
-    fifo8_create(&s->rx, SPI_LINK_FIFO_DEPTH);
     qemu_chr_fe_set_handlers(&s->chr, spi_link_can_receive, spi_link_receive,
                              NULL, NULL, s, NULL, true);
 }
 
 static const VMStateDescription vmstate_spi_link = {
     .name = "spi-link",
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = (const VMStateField[]) {
         VMSTATE_SSI_PERIPHERAL(parent_obj, SpiLinkState),
         VMSTATE_FIFO8(rx, SpiLinkState),
+        VMSTATE_FIFO8(tx, SpiLinkState),
         VMSTATE_END_OF_LIST()
     },
 };
@@ -106,10 +176,12 @@ static void spi_link_class_init(ObjectClass *klass, const void *data)
 }
 
 static const TypeInfo spi_link_info = {
-    .name          = TYPE_SPI_LINK,
-    .parent        = TYPE_SSI_PERIPHERAL,
-    .instance_size = sizeof(SpiLinkState),
-    .class_init    = spi_link_class_init,
+    .name             = TYPE_SPI_LINK,
+    .parent           = TYPE_SSI_PERIPHERAL,
+    .instance_size    = sizeof(SpiLinkState),
+    .instance_init    = spi_link_init,
+    .instance_finalize = spi_link_finalize,
+    .class_init       = spi_link_class_init,
 };
 
 static void spi_link_register_types(void)
