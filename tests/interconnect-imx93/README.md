@@ -13,7 +13,32 @@ tests/interconnect-imx93/run-eth.sh     # two instances, FEC (eth0) <-> socket <
 tests/interconnect-imx93/run-uart.sh    # two instances, LPUART2 <-> socket <-> LPUART2
 tests/interconnect-imx93/run-spi.sh     # two instances, LPSPI1 <-> spi-link <-> socket <-> LPSPI1
 tests/interconnect-imx93/run-can.sh     # two instances, FlexCAN <-> can-host-chardev <-> socket
+tests/interconnect-imx93/run-i2c.sh     # two instances, LPI2C <-> i2c-link <-> socket <-> LPI2C
 ```
+
+## I2C link (`run-i2c.sh`)
+
+Two i.MX 93 guests, each board's **LPI2C3** master with an **`i2c-link`** target
+attached at a fixed address (`-device i2c-link,bus=lpi2c3,address=0x42`), and the
+two links joined by a unix chardev socket — one listens, one connects. I2C is
+master/slave (unlike SPI/CAN), so `i2c-link` is the analogue of `spi-link`: a
+bridged mailbox. The sender's master **writes** the payload to the link address
+(the link forwards it over the socket to the peer); the receiver's master
+**reads** from the link address (the link returns the bytes the peer wrote) and
+checks them **byte-exact**:
+
+```
+I2CLINK:PASS: 33 bytes crossed the I2C link byte-exact
+PASS: payload crossed LPI2C<->i2c-link<->socket<->i2c-link<->LPI2C byte-exact between two i.MX 93 guests
+```
+
+`i2c-link` (`hw/i2c/i2c_link.c`) is an `I2CSlave`: `send()` queues the master's
+write byte to a tx FIFO drained non-blocking (a `G_IO_OUT` watch resumes on
+back-pressure — the vCPU never blocks in an I2C send), `recv()` returns the
+peer's byte from an rx FIFO (or `0xff` idle). LPI2C3 is enabled on the stock EVK
+dtb and `i2c-dev` is builtin, so — unlike SPI/CAN — no dtb edit or module load is
+needed; the oracle ([`i2clink`](i2clink.c)) uses raw `I2C_RDWR` ioctls on the
+`/dev/i2c-N` adapter it finds for `i2c@42530000`.
 
 ## CAN link (`run-can.sh`)
 
