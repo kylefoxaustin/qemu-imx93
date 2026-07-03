@@ -28,7 +28,7 @@ _Status column source: real meson testlog._
 | Torture / concurrency | `tests/torture/` | Live desktop while NPU/CPU/storage/net hammer | 0 oops / 0 wedge (attested) |
 | Soak | `(run log)` | 24 h comprehensive, all datapaths concurrent | PASS 2026-06-13 — 11 cycles, 61 boots, 0 incidents, RSS flat (attested) |
 | Inter-QEMU USB (mission #5) | `tests/usbredir-imx93/ (host end)` | usb-redir imx93 host <-> MCX device: enumerate (HS) + vendor bulk-echo + CDC-ACM /dev/ttyACM0, byte-exact | PASS — bulk 64B echoed byte-for-byte; CDC ttyACM round-trip; proven on imx93 + imx91 hosts (attested) |
-| Inter-QEMU interconnect (board-to-board) | `tests/interconnect-imx93/ (run-{eth,uart,spi,can}.sh + run-spi-mcx.sh)` | Two instances bridged by a QEMU socket, real data crosses byte-exact: FEC eth, LPUART2, LPSPI1 (spi-link), FlexCAN (can-host-chardev); + cross-SoC 93<->MCX/91/95 | PASS — eth/UART/SPI/CAN each byte-exact b2b; full cross-SoC matrix (91/93/95/MCX) closed (attested) |
+| Inter-QEMU interconnect (board-to-board) | `tests/interconnect-imx93/ (run-{eth,uart,spi,can,i2c}.sh + run-spi-mcx.sh)` | Two instances bridged by a QEMU socket, real data crosses byte-exact: FEC eth, LPUART2, LPSPI1 (spi-link), FlexCAN (can-host-chardev), LPI2C3 (i2c-link); + cross-SoC 93<->MCX/91/95 | PASS — eth/UART/SPI/CAN/I2C each byte-exact b2b; full cross-SoC matrix (91/93/95/MCX) closed (attested) |
 
 ## Compute / boot core
 
@@ -71,7 +71,7 @@ _Status column source: real meson testlog._
 
 | Block | Tier | Status | Evidence | Notes |
 |-------|------|--------|----------|-------|
-| LPI2C x8 | B | PASS (1) | qtest; -device bus=lpi2cN attachable |  |
+| LPI2C x8 | A | PASS (1) | qtest; -device bus=lpi2cN attachable; board-to-board byte-exact via i2c-link (run-i2c.sh) |  |
 | LPSPI x8 | A | PASS (1) | qtest; board-to-board byte-exact via spi-link (run-spi.sh); cross-SoC 93<->MCX / 93<->95 / 91<->93 | PARAM.PCSNUM + per-frame FCF fixes let the real fsl-lpspi bind + move data |
 | LPUART x8 | A | — | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact (run-uart.sh) |  |
 | FlexIO | B | PASS (1) | qtest (I2C master) |  |

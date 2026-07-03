@@ -55,9 +55,9 @@ harnesses:
     scope: "usb-redir imx93 host <-> MCX device: enumerate (HS) + vendor bulk-echo + CDC-ACM /dev/ttyACM0, byte-exact"
     result: "PASS — bulk 64B echoed byte-for-byte; CDC ttyACM round-trip; proven on imx93 + imx91 hosts (attested)"
   - harness: "Inter-QEMU interconnect (board-to-board)"
-    location: "tests/interconnect-imx93/ (run-{eth,uart,spi,can}.sh + run-spi-mcx.sh)"
-    scope: "Two instances bridged by a QEMU socket, real data crosses byte-exact: FEC eth, LPUART2, LPSPI1 (spi-link), FlexCAN (can-host-chardev); + cross-SoC 93<->MCX/91/95"
-    result: "PASS — eth/UART/SPI/CAN each byte-exact b2b; full cross-SoC matrix (91/93/95/MCX) closed (attested)"
+    location: "tests/interconnect-imx93/ (run-{eth,uart,spi,can,i2c}.sh + run-spi-mcx.sh)"
+    scope: "Two instances bridged by a QEMU socket, real data crosses byte-exact: FEC eth, LPUART2, LPSPI1 (spi-link), FlexCAN (can-host-chardev), LPI2C3 (i2c-link); + cross-SoC 93<->MCX/91/95"
+    result: "PASS — eth/UART/SPI/CAN/I2C each byte-exact b2b; full cross-SoC matrix (91/93/95/MCX) closed (attested)"
 
 groups:
   - name: "Compute / boot core"
@@ -139,8 +139,8 @@ groups:
   - name: "Expansion buses (developer-attachable)"
     rows:
       - block: "LPI2C x8"
-        tier: B
-        evidence: "qtest; -device bus=lpi2cN attachable"
+        tier: A
+        evidence: "qtest; -device bus=lpi2cN attachable; board-to-board byte-exact via i2c-link (run-i2c.sh)"
         tests: [imx93-lpi2c-test]
       - block: "LPSPI x8"
         tier: A
