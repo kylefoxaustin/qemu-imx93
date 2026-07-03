@@ -879,6 +879,32 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
     }
 
     /*
+     * LPUART RX is paged through a cyclic eDMA channel by the imx-lpuart
+     * driver, so each LPUART's RX DMA-request line must drive its eDMA at the
+     * RX source id from the EVK DTB dmas= props - otherwise DMA-mode RX never
+     * advances and received bytes never reach userspace. (TX is mem->device,
+     * which the eDMA runs whole at channel start, so it needs no request line.)
+     * LPUART1/2 are on eDMA1 (AONMIX), LPUART3-8 on eDMA2 (WAKEUPMIX).
+     */
+    {
+        static const struct {
+            int edma;       /* 1 = AONMIX eDMA1, 2 = WAKEUPMIX eDMA2 */
+            int rx_src;
+        } lpuart_dma[FSL_IMX93_NUM_MODELED_LPUARTS] = {
+            { 1, 0x11 }, { 1, 0x13 },               /* LPUART1, LPUART2 */
+            { 2, 0x12 }, { 2, 0x14 }, { 2, 0x16 },  /* LPUART3, 4, 5 */
+            { 2, 0x18 }, { 2, 0x58 }, { 2, 0x5a },  /* LPUART6, 7, 8 */
+        };
+        for (i = 0; i < FSL_IMX93_NUM_MODELED_LPUARTS; i++) {
+            DeviceState *edma = lpuart_dma[i].edma == 1 ?
+                DEVICE(&s->edma1) : DEVICE(&s->edma2);
+            qdev_connect_gpio_out_named(DEVICE(&s->lpuart[i]),
+                "dma-req-rx", 0,
+                qdev_get_gpio_in_named(edma, "dma-req", lpuart_dma[i].rx_src));
+        }
+    }
+
+    /*
      * LPI2C1: the display side I2C bus. Carries the ADV7535 DSI-to-HDMI
      * bridge (main map @ 0x3d) plus its CEC (0x3b) and packet (0x38) maps,
      * and an EDID-serving DDC slave at the bridge's EDID address (0x3f) so

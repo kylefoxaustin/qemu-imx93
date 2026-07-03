@@ -299,6 +299,25 @@ static void imx_lpuart_receive(void *opaque, const uint8_t *buf, int size)
     s->rx_byte = buf[0];
     s->rx_full = true;
     s->stat |= LPUART_STAT_RDRF;
+
+    /*
+     * In DMA-RX mode (BAUD.RDMAE) the i.MX driver pages RX through a cyclic
+     * eDMA channel and leaves CTRL.RIE clear, so the byte must be pulled by a
+     * DMA request rather than an interrupt. Pulse the request line: the eDMA
+     * reads LPUART_DATA (clearing rx_full/RDRF) into its ring buffer. If no
+     * matching cyclic channel is armed the pulse is a no-op and the RIE path
+     * still applies, so PIO-RX is unaffected.
+     *
+     * The imx7ulp/imx8ulp/imx93 driver sets dma_idle_int and flushes the DMA
+     * ring to the tty on an IDLE interrupt, not on RDRF - so after the byte is
+     * in the ring, raise STAT.IDLE to drive that flush (our RX path is one byte
+     * deep, so the line is idle again). update_irq gates IDLE on CTRL.ILIE,
+     * which the driver enables only in DMA-RX mode, so PIO-RX is unaffected.
+     */
+    if (s->baud & LPUART_BAUD_RDMAE) {
+        qemu_irq_pulse(s->dma_req_rx);
+        s->stat |= LPUART_STAT_IDLE;
+    }
     imx_lpuart_update_irq(s);
 }
 
@@ -310,8 +329,15 @@ static const MemoryRegionOps imx_lpuart_ops = {
         .min_access_size = 4,
         .max_access_size = 4,
     },
+    /*
+     * The CPU accesses the registers 32-bit, but the eDMA pulls/pushes the DATA
+     * register a byte at a time for DMA RX/TX. Accept byte accesses (the .impl
+     * width keeps the handler working in 32-bit units; the framework extracts
+     * or inserts the addressed byte), otherwise a DMA RX read of DATA is
+     * rejected before it reaches the handler and rx_full never clears.
+     */
     .valid = {
-        .min_access_size = 4,
+        .min_access_size = 1,
         .max_access_size = 4,
     },
 };
@@ -333,6 +359,7 @@ static void imx_lpuart_init(Object *obj)
                           TYPE_IMX_LPUART, IMX_LPUART_REG_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->irq);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->dma_req_rx, "dma-req-rx", 1);
 }
 
 static const Property imx_lpuart_properties[] = {
