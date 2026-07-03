@@ -27,7 +27,8 @@ _Status column source: real meson testlog._
 | Media conformance | `tests/media-conformance/` | v4l2-compliance (ISI), modetest (LCDIF/KMS) | 36 PASS / 0 FAIL / 26 SKIP (attested) |
 | Torture / concurrency | `tests/torture/` | Live desktop while NPU/CPU/storage/net hammer | 0 oops / 0 wedge (attested) |
 | Soak | `(run log)` | 24 h comprehensive, all datapaths concurrent | PASS 2026-06-13 — 11 cycles, 61 boots, 0 incidents, RSS flat (attested) |
-| Inter-QEMU USB (M1) | `tests/usbredir-imx93/ (host end)` | usb-redir host wire handshake (imx93 host <-> MCX device) | PASS — host-end hello live; full enumeration pending MCX pairing (attested) |
+| Inter-QEMU USB (mission #5) | `tests/usbredir-imx93/ (host end)` | usb-redir imx93 host <-> MCX device: enumerate (HS) + vendor bulk-echo + CDC-ACM /dev/ttyACM0, byte-exact | PASS — bulk 64B echoed byte-for-byte; CDC ttyACM round-trip; proven on imx93 + imx91 hosts (attested) |
+| Inter-QEMU interconnect (board-to-board) | `tests/interconnect-imx93/ (run-{eth,uart,spi,can}.sh + run-spi-mcx.sh)` | Two instances bridged by a QEMU socket, real data crosses byte-exact: FEC eth, LPUART2, LPSPI1 (spi-link), FlexCAN (can-host-chardev); + cross-SoC 93<->MCX/91/95 | PASS — eth/UART/SPI/CAN each byte-exact b2b; full cross-SoC matrix (91/93/95/MCX) closed (attested) |
 
 ## Compute / boot core
 
@@ -44,10 +45,10 @@ _Status column source: real meson testlog._
 
 | Block | Tier | Status | Evidence | Notes |
 |-------|------|--------|----------|-------|
-| FEC (imx_fec) | A | — | Real traffic + DHCP; torture drives live FEC |  |
+| FEC (imx_fec) | A | — | Real traffic + DHCP; torture drives live FEC; board-to-board byte-exact (run-eth.sh) |  |
 | eQOS (dwmac) | A | — | Real traffic + DHCP |  |
 | uSDHC (SD/eMMC) | A | — | Boots rootfs from SD |  |
-| USB (Chipidea host) | B | — | Real USB devices enumerate in-guest; usb-redir host wire live (M1) | Enumeration data path proven; inter-QEMU link is mission #5 M1 |
+| USB (Chipidea host) | A | — | Real USB devices enumerate in-guest; inter-QEMU usb-redir link byte-exact — vendor bulk-echo (64B) + CDC-ACM /dev/ttyACM0 round-trip vs MCX gadget, on imx93 + imx91 hosts | PORTSC.PSPD fix drives HS enumeration; mission #5 USB data path complete |
 
 ## Display / graphics / camera / audio
 
@@ -71,11 +72,11 @@ _Status column source: real meson testlog._
 | Block | Tier | Status | Evidence | Notes |
 |-------|------|--------|----------|-------|
 | LPI2C x8 | B | PASS (1) | qtest; -device bus=lpi2cN attachable |  |
-| LPSPI x8 | B | PASS (1) | qtest |  |
-| LPUART x8 | A | — | Serial console |  |
+| LPSPI x8 | A | PASS (1) | qtest; board-to-board byte-exact via spi-link (run-spi.sh); cross-SoC 93<->MCX / 93<->95 / 91<->93 | PARAM.PCSNUM + per-frame FCF fixes let the real fsl-lpspi bind + move data |
+| LPUART x8 | A | — | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact (run-uart.sh) |  |
 | FlexIO | B | PASS (1) | qtest (I2C master) |  |
 | FlexSPI | B | PASS (1) | qtest (NOR bring-up) |  |
-| FlexCAN / CAN bus | B | — | Driver bring-up, can-bus connectable |  |
+| FlexCAN / CAN bus | A | — | Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93 | can-host-chardev bridges a can-bus to a chardev — no host vcan/SocketCAN needed |
 | GPIO / PMIC | B | — | Poweroff, GPIO-idle-HIGH; PMIC over I2C |  |
 | ADC | B | — | Driver bring-up |  |
 

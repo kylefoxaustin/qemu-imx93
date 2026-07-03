@@ -50,10 +50,14 @@ harnesses:
     location: "(run log)"
     scope: "24 h comprehensive, all datapaths concurrent"
     result: "PASS 2026-06-13 — 11 cycles, 61 boots, 0 incidents, RSS flat (attested)"
-  - harness: "Inter-QEMU USB (M1)"
+  - harness: "Inter-QEMU USB (mission #5)"
     location: "tests/usbredir-imx93/ (host end)"
-    scope: "usb-redir host wire handshake (imx93 host <-> MCX device)"
-    result: "PASS — host-end hello live; full enumeration pending MCX pairing (attested)"
+    scope: "usb-redir imx93 host <-> MCX device: enumerate (HS) + vendor bulk-echo + CDC-ACM /dev/ttyACM0, byte-exact"
+    result: "PASS — bulk 64B echoed byte-for-byte; CDC ttyACM round-trip; proven on imx93 + imx91 hosts (attested)"
+  - harness: "Inter-QEMU interconnect (board-to-board)"
+    location: "tests/interconnect-imx93/ (run-{eth,uart,spi,can}.sh + run-spi-mcx.sh)"
+    scope: "Two instances bridged by a QEMU socket, real data crosses byte-exact: FEC eth, LPUART2, LPSPI1 (spi-link), FlexCAN (can-host-chardev); + cross-SoC 93<->MCX/91/95"
+    result: "PASS — eth/UART/SPI/CAN each byte-exact b2b; full cross-SoC matrix (91/93/95/MCX) closed (attested)"
 
 groups:
   - name: "Compute / boot core"
@@ -85,7 +89,7 @@ groups:
     rows:
       - block: "FEC (imx_fec)"
         tier: A
-        evidence: "Real traffic + DHCP; torture drives live FEC"
+        evidence: "Real traffic + DHCP; torture drives live FEC; board-to-board byte-exact (run-eth.sh)"
       - block: "eQOS (dwmac)"
         tier: A
         evidence: "Real traffic + DHCP"
@@ -93,9 +97,9 @@ groups:
         tier: A
         evidence: "Boots rootfs from SD"
       - block: "USB (Chipidea host)"
-        tier: B
-        evidence: "Real USB devices enumerate in-guest; usb-redir host wire live (M1)"
-        notes: "Enumeration data path proven; inter-QEMU link is mission #5 M1"
+        tier: A
+        evidence: "Real USB devices enumerate in-guest; inter-QEMU usb-redir link byte-exact — vendor bulk-echo (64B) + CDC-ACM /dev/ttyACM0 round-trip vs MCX gadget, on imx93 + imx91 hosts"
+        notes: "PORTSC.PSPD fix drives HS enumeration; mission #5 USB data path complete"
 
   - name: "Display / graphics / camera / audio"
     rows:
@@ -139,12 +143,13 @@ groups:
         evidence: "qtest; -device bus=lpi2cN attachable"
         tests: [imx93-lpi2c-test]
       - block: "LPSPI x8"
-        tier: B
-        evidence: "qtest"
+        tier: A
+        evidence: "qtest; board-to-board byte-exact via spi-link (run-spi.sh); cross-SoC 93<->MCX / 93<->95 / 91<->93"
         tests: [imx93-lpspi-test]
+        notes: "PARAM.PCSNUM + per-frame FCF fixes let the real fsl-lpspi bind + move data"
       - block: "LPUART x8"
         tier: A
-        evidence: "Serial console"
+        evidence: "Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact (run-uart.sh)"
       - block: "FlexIO"
         tier: B
         evidence: "qtest (I2C master)"
@@ -154,8 +159,9 @@ groups:
         evidence: "qtest (NOR bring-up)"
         tests: [imx93-flexspi-test]
       - block: "FlexCAN / CAN bus"
-        tier: B
-        evidence: "Driver bring-up, can-bus connectable"
+        tier: A
+        evidence: "Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93"
+        notes: "can-host-chardev bridges a can-bus to a chardev — no host vcan/SocketCAN needed"
       - block: "GPIO / PMIC"
         tier: B
         evidence: "Poweroff, GPIO-idle-HIGH; PMIC over I2C"
