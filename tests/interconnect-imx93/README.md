@@ -12,7 +12,34 @@ the i.MX 9 family.
 tests/interconnect-imx93/run-eth.sh     # two instances, FEC (eth0) <-> socket <-> FEC
 tests/interconnect-imx93/run-uart.sh    # two instances, LPUART2 <-> socket <-> LPUART2
 tests/interconnect-imx93/run-spi.sh     # two instances, LPSPI1 <-> spi-link <-> socket <-> LPSPI1
+tests/interconnect-imx93/run-can.sh     # two instances, FlexCAN <-> can-host-chardev <-> socket
 ```
+
+## CAN link (`run-can.sh`)
+
+Two i.MX 93 guests, each with its **FlexCAN** on an emulated `can-bus` bridged to
+a QEMU chardev by a **`can-host-chardev`** object — one instance listens, the
+other connects. `can-host-chardev` bridges a `can-bus` to a chardev (vs host
+SocketCAN), so no `vcan`/root is needed. The sender transmits a CAN frame
+(id `0x321`, `"CANLink!"`), the receiver reads it and checks it **byte-exact**:
+
+```
+CANLINK:PASS: frame id=0x321 [CANLink!] crossed the CAN link byte-exact
+PASS: CAN frame crossed FlexCAN<->can-bus<->can-host-chardev<->socket<->FlexCAN byte-exact between two i.MX 93 guests
+```
+
+Per instance: `-object can-bus,id=cb -machine canbus0=cb,canbus1=cb` +
+`-object can-host-chardev,id=canh,canbus=cb,chardev=<id>`. FlexCAN is disabled in
+the stock dtb, so a dt overlay (`tests/flexcan/flexcan-overlay.dtso`, applied
+with `fdtoverlay`) enables flexcan1/2 + a dummy transceiver regulator (the real
+`xceiver-supply` is a GPIO regulator behind an unmodelled i2c expander, so the
+node would defer forever without it). CAN is a set of kernel modules, loaded
+from the BSP rootfs (`can`, `can-dev`, `can-raw`, `flexcan`).
+
+The `can-host-chardev` backend (`net/can/can_host_chardev.c`) is new: it must be
+in `system/vl.c`'s delayed-object list (it references a chardev) and in
+`qapi/qom.json`'s `ObjectType` enum. Both canbuses wire to one `can-bus` because
+Linux may enumerate either FlexCAN as `can0`.
 
 ## Ethernet link (`run-eth.sh`)
 
