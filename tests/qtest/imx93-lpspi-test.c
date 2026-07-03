@@ -36,7 +36,8 @@
 #define TCR_CONT (1u << 21)
 
 #define VERID_VALUE 0x02000004
-#define PARAM_VALUE 0x00000404
+/* PCSNUM (bits 19:16) = 4 chip-selects; TX/RX FIFO depth nibbles = 16 each. */
+#define PARAM_VALUE 0x00040404
 
 #define RXCOUNT(fsr) (((fsr) >> 16) & 0xff)
 
