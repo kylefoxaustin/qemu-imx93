@@ -137,31 +137,55 @@ static void edma_run_channel(IMX93EdmaState *s, int ch)
     uint16_t citer = ld16(t + TCD_CITER) & ITER_MASK;
     uint32_t ssize = 1u << ATTR_SSIZE(attr);
     uint32_t dsize = 1u << ATTR_DSIZE(attr);
-    uint32_t esize = MAX(ssize, dsize);
     uint8_t buf[8];
 
     if (citer == 0) {
         citer = 1;
     }
-    if (nbytes == 0 || esize == 0 || esize > sizeof(buf)) {
+    if (nbytes == 0 || ssize == 0 || dsize == 0 ||
+        ssize > sizeof(buf) || dsize > sizeof(buf)) {
         return;
     }
 
     /*
-     * Run the whole TCD: CITER minor loops, each moving NBYTES element by
-     * element so that fixed peripheral addresses (SOFF or DOFF == 0) are hit
-     * with the access width the device register expects, while the memory side
-     * walks linearly. A minor-loop offset (MLOFF) rewinds the enabled side at
-     * each minor-loop boundary.
+     * Run the whole TCD: CITER minor loops, each moving NBYTES bytes so that
+     * fixed peripheral addresses (SOFF or DOFF == 0) are hit with the access
+     * width the device register expects, while the memory side walks linearly.
+     * A minor-loop offset (MLOFF) rewinds the enabled side at each boundary.
+     *
+     * SSIZE and DSIZE are independent: the source is read in SSIZE-byte beats
+     * and the destination written in DSIZE-byte beats. When they match (every
+     * real i.MX 93 eDMA path - I2C/SAI/LPUART are all byte- or halfword-locked)
+     * a single per-element read+write suffices. When they differ (e.g. a word
+     * memory source feeding a byte-wide peripheral DATA register), coalescing
+     * to MAX(ssize,dsize) would write a word to a byte register and drop the
+     * upper bytes - so buffer the minor loop and re-beat it at each side's
+     * native width.
      */
     for (uint16_t ml = 0; ml < citer; ml++) {
-        for (uint64_t done = 0; done + esize <= nbytes; done += esize) {
-            address_space_read(&address_space_memory, saddr,
-                               MEMTXATTRS_UNSPECIFIED, buf, esize);
-            address_space_write(&address_space_memory, daddr,
-                                MEMTXATTRS_UNSPECIFIED, buf, esize);
-            saddr += soff;
-            daddr += doff;
+        if (ssize == dsize) {
+            for (uint64_t done = 0; done + ssize <= nbytes; done += ssize) {
+                address_space_read(&address_space_memory, saddr,
+                                   MEMTXATTRS_UNSPECIFIED, buf, ssize);
+                address_space_write(&address_space_memory, daddr,
+                                    MEMTXATTRS_UNSPECIFIED, buf, ssize);
+                saddr += soff;
+                daddr += doff;
+            }
+        } else {
+            g_autofree uint8_t *mlbuf = g_malloc(nbytes);
+            uint64_t off;
+
+            for (off = 0; off + ssize <= nbytes; off += ssize) {
+                address_space_read(&address_space_memory, saddr,
+                                   MEMTXATTRS_UNSPECIFIED, mlbuf + off, ssize);
+                saddr += soff;
+            }
+            for (off = 0; off + dsize <= nbytes; off += dsize) {
+                address_space_write(&address_space_memory, daddr,
+                                    MEMTXATTRS_UNSPECIFIED, mlbuf + off, dsize);
+                daddr += doff;
+            }
         }
         if (raw_nbytes & NBYTES_SMLOE) {
             saddr += mloff;
