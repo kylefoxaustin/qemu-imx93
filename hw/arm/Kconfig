@@ -651,6 +651,7 @@ config FSL_IMX93
     select IMX93_TMU
     select IMX93_ADC
     select IMX93_LPSPI
+    select SPI_LINK
     select IMX93_OCOTP
     select IMX93_SYSCTR
     select IMX93_TPM

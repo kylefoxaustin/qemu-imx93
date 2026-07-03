@@ -50,8 +50,13 @@
 #define TCR_FRAMESZ_MASK 0xfff
 #define TCR_CONT (1u << 21)
 
-/* PARAM: tx/rx FIFO depth = 1 << nibble; report 16-entry FIFOs. */
-#define LPSPI_PARAM_VALUE 0x00000404
+/*
+ * PARAM: TXFIFO/RXFIFO depth = 1 << nibble (report 16-entry FIFOs) and PCSNUM
+ * (bits 19:16) = number of chip-selects. The fsl-lpspi driver reads num-cs from
+ * PARAM[19:16] for "fsl,imx93-spi"; PCSNUM=0 makes spi_register_controller fail
+ * with -EINVAL (num_chipselect=0), so report the LPSPI's 4 PCS.
+ */
+#define LPSPI_PARAM_VALUE 0x00040404
 #define LPSPI_VERID_VALUE 0x02000004
 #define LPSPI_FIFO_DEPTH  16
 
@@ -82,10 +87,14 @@ static void lpspi_transfer(IMX93LpspiState *s, uint32_t tx)
     if (!fifo32_is_full(&s->rx)) {
         fifo32_push(&s->rx, rx);
     }
-    s->sr |= SR_TCF;
-    if (!(s->tcr & TCR_CONT)) {
-        s->sr |= SR_FCF;        /* CS deasserts: frame complete */
-    }
+    /*
+     * This functional model completes each frame immediately, so raise both
+     * TCF (transfer complete) and FCF (frame complete). The fsl-lpspi driver
+     * keeps TCR_CONT asserted across a message and only enables FCIE once all
+     * bytes are written, then waits on FCF - so signalling FCF per frame here
+     * is what lets that wait complete (gating FCF on !CONT would hang it).
+     */
+    s->sr |= SR_TCF | SR_FCF;
 }
 
 static uint64_t lpspi_read(void *opaque, hwaddr offset, unsigned size)
