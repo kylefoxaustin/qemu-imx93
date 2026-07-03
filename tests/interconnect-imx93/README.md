@@ -135,3 +135,26 @@ Two fixes were needed for a real `fsl-lpspi` controller to bind and move data:
 - **Generous window overlap.** The receiver clocks for ~45 s and the sender
   resends across it — the spi-link FIFO buffers, but the two guests' boot
   offsets mean a short window can miss the sends entirely.
+
+### Cross-SoC: 93 ↔ MCXN947 (`run-spi-mcx.sh`)
+
+The same `spi-link` transport bridges *different* SoCs. `run-spi-mcx.sh` runs a
+live cross-check between this i.MX 93 (a **Linux `fsl-lpspi`** master over
+`/dev/spidev`) and the **MCXN947** (a **bare-metal Cortex-M33** master, the
+`mcxn947qemu` `tests/mcxn-spi-link` firmware). Each attaches a `spi-link` to its
+named LPSPI bus, joined by a unix socket; the 93 clocks a `[0xA5, 32-byte
+pattern]` frame out (the M33 collects + verifies it) while draining the M33's
+`0x5A` stream in (the 93 verifies it) — byte-exact both directions:
+
+```
+i.MX 93:  SPIPEER: MOSI-in 128 bytes, 0 not-0x5A -> RXOK
+MCXN947:  SPI LINK PASS 32
+PASS: i.MX 93 Linux fsl-lpspi <-> MCXN947 bare-metal M33, byte-exact both directions
+```
+
+Cross-repo: it needs a built `mcxn947qemu` QEMU + `arm-none-eabi-gcc` for the
+M33 firmware (set `RMCX=` to the checkout); it `SKIP`s cleanly if absent. One
+gotcha: the M33 firmware is **one-shot** (streams `0x5A`, collects 32, then
+stops), so the 93 peer clocks a **bounded** byte count once — a busy loop would
+fill the peer's 256-deep spi-link FIFO once the M33 stops draining, and the
+resulting socket backpressure blocks the LPSPI TDR write.
