@@ -169,6 +169,82 @@ def render(doc, testlog, have_log):
     return "\n".join(out) + "\n"
 
 
+# ---- README condensed capability table (same YAML, second rendering) --------
+REPO = os.path.dirname(os.path.dirname(HERE))
+README_BEGIN = "<!-- BEGIN capability-table (generated from test-matrix.yaml) -->"
+README_END = "<!-- END capability-table (generated from test-matrix.yaml) -->"
+
+
+def _present_tiers(doc):
+    """{block name: tier} for every per-block row across all groups."""
+    out = {}
+    for g in doc.get("groups", []):
+        for r in g.get("rows", []):
+            out[r["block"]] = r["tier"]
+    return out
+
+
+def verify_groups(doc):
+    """Every present/absent block is grouped exactly once; groups are single-tier.
+
+    The anti-drift guard: the README condensed table and the detailed matrix
+    render from the same blocks, so a block added/removed/re-tiered in the YAML
+    must be reflected in a readme_group or generation fails.
+    """
+    present = _present_tiers(doc)
+    absent = {n["block"] for n in doc.get("na", [])}
+    seen_p, seen_a, errs = [], [], []
+    for g in doc.get("readme_groups", []):
+        for b in g["blocks"]:
+            seen_p.append(b)
+            if b not in present:
+                errs.append(f"readme_group '{g['label']}' lists unknown block {b}")
+            elif present[b] != g["tier"]:
+                errs.append(f"'{b}' is tier {present[b]} but group "
+                            f"'{g['label']}' is tier {g['tier']}")
+    for g in doc.get("readme_absent", []):
+        for b in g["blocks"]:
+            seen_a.append(b)
+            if b not in absent:
+                errs.append(f"readme_absent lists unknown block {b}")
+    for b in present:
+        if seen_p.count(b) != 1:
+            errs.append(f"present block '{b}' grouped {seen_p.count(b)}x (want 1)")
+    for b in absent:
+        if seen_a.count(b) != 1:
+            errs.append(f"absent block '{b}' grouped {seen_a.count(b)}x (want 1)")
+    if errs:
+        raise SystemExit("readme_group drift:\n  " + "\n  ".join(errs))
+
+
+def render_readme_capability(doc):
+    out = ["| Subsystem | Tier | Evidence |", "|---|:--:|---|"]
+    for g in doc.get("readme_groups", []):
+        out.append(f"| {g['label']} | {g['tier']} | {g.get('evidence', '')} |")
+    out += ["", "**Absent on i.MX 93 silicon — N/A (never a failure):**", "",
+            "| Block | Why absent |", "|---|---|"]
+    for g in doc.get("readme_absent", []):
+        out.append(f"| {g['label']} | {g['reason']} |")
+    return "\n".join(out)
+
+
+def inject_readme(doc, path):
+    verify_groups(doc)
+    text = open(path).read()
+    if README_BEGIN not in text or README_END not in text:
+        raise SystemExit(f"{path}: missing capability-table markers")
+    head, rest = text.split(README_BEGIN, 1)
+    _, tail = rest.split(README_END, 1)
+    block = f"{README_BEGIN}\n{render_readme_capability(doc)}\n{README_END}"
+    new = head + block + tail
+    if new != text:
+        open(path, "w").write(new)
+        sys.stderr.write(f"updated {path} capability table from test-matrix.yaml\n")
+        return 1
+    sys.stderr.write(f"{path} capability table already in sync\n")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--yaml", default=os.path.join(HERE, "test-matrix.yaml"))
@@ -177,15 +253,31 @@ def main():
     ap.add_argument("--out", default=os.path.join(HERE, "test-result-matrix.md"))
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if --out differs from freshly generated")
+    ap.add_argument("--inject-readme", nargs="?",
+                    const=os.path.join(REPO, "README.md"),
+                    help="regenerate the README capability table from the YAML "
+                         "(between the capability-table markers) and exit")
     args = ap.parse_args()
 
     with open(args.yaml) as f:
         doc = yaml.safe_load(f)
+
+    if args.inject_readme is not None:
+        return inject_readme(doc, args.inject_readme)
+
     testlog = load_testlog(args.testlog)
     have_log = bool(testlog)
     text = render(doc, testlog, have_log)
 
     if args.check:
+        verify_groups(doc)     # anti-drift: README groups cover every block once
+        readme = os.path.join(REPO, "README.md")
+        if os.path.exists(readme) and README_BEGIN in open(readme).read():
+            if inject_readme(doc, readme):
+                sys.stderr.write(
+                    f"{readme} capability table is stale - "
+                    f"run gen-matrix.py --inject-readme\n")
+                return 1
         existing = open(args.out).read() if os.path.exists(args.out) else ""
         if existing != text:
             sys.stderr.write(

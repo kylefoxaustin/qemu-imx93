@@ -168,6 +168,9 @@ groups:
       - block: "ADC"
         tier: B
         evidence: "Driver bring-up"
+      - block: "I3C1 (Silvaco)"
+        tier: B
+        evidence: "I3C master bridges to legacy-I2C; wm8962-on-I3C audio card probes over it"
 
 na:
   - block: "System Manager / SCMI"
@@ -176,6 +179,90 @@ na:
     why: "i.MX95-only block; JPEG on i.MX93 is software"
   - block: "GPU (compute)"
     why: "No emulatable GPU compute; Linux sees the node but 3D is not executed"
+
+# README capability-table view (condensed rendering; the detailed per-block table
+# is docs/validation/test-result-matrix.md). One source of truth = this file, two
+# renderings. gen-matrix.py --inject-readme regenerates the README table from here
+# and VERIFIES every present/absent block is grouped exactly once and every group
+# is single-tier (so the README table and the matrix cannot drift).
+readme_groups:
+  - { label: "Dual Cortex-A55 SMP, GICv3", tier: A,
+      evidence: "Boots NXP + mainline Linux to a shell on ttyLP0; clean PSCI power-off",
+      blocks: ["Dual Cortex-A55 SMP"] }
+  - { label: "Cortex-M33 + A55↔M33 RPMsg (MU1)", tier: A,
+      evidence: "Real NXP FreeRTOS firmware; rpmsg_lite ping-pong round-trips over shared vrings",
+      blocks: ["Cortex-M33 + RPMsg (MU)"] }
+  - { label: "Ethos-U65 microNPU", tier: A,
+      evidence: "Bit-exact int8 inference in-QEMU (Vela command stream: mlw decode, conv/dw/pool/elementwise, gemmlowp requant); matches host TFLite; 19 unit + 12 qtest subtests",
+      blocks: ["Ethos-U65 microNPU"] }
+  - { label: "eDMA1 / eDMA2", tier: A,
+      evidence: "Real TCD execution - LPI2C EDID read, cyclic scatter-gather audio pacing, per-CHn_MUX routing",
+      blocks: ["eDMA1 / eDMA2"] }
+  - { label: "Networking — FEC (eth0) + eQOS/dwmac4 (eth1)", tier: A,
+      evidence: "Both DHCP; real frames; board-to-board byte-exact",
+      blocks: ["FEC (imx_fec)", "eQOS (dwmac)"] }
+  - { label: "Storage — uSDHC", tier: A,
+      evidence: "SDHCI ADMA; ext4 mmcblk0 r/w/sync from -drive if=sd",
+      blocks: ["uSDHC (SD/eMMC)"] }
+  - { label: "Display — LCDIFv3 → DSI → ADV7535 → HDMI (+ LVDS)", tier: A,
+      evidence: "1920x1080 /dev/fb0, framebuffer scanned out + screendump byte-correct; fbcon login",
+      blocks: ["LCDIFv3 -> MIPI-DSI -> ADV7535 -> HDMI"] }
+  - { label: "Camera — MT9M114/OV5640 → CSI → ISI → V4L2", tier: A,
+      evidence: "5/5 byte-checked frames off /dev/video0 (parallel + MIPI-CSI2); host-image virtual camera",
+      blocks: ["ISI + MIPI-CSI + MT9M114 / OV5640"] }
+  - { label: "Audio — SAI3/WM8962 play + capture", tier: A,
+      evidence: "Real PCM via cyclic eDMA2; -audio driver=wav captures a played square wave byte-correct; concurrent streams",
+      blocks: ["SAI3 + WM8962 codec"] }
+  - { label: "PXP 2D (G2D)", tier: A,
+      evidence: "copy/fill/blit/src-over-blend/rotate byte-exact (libg2d -> /dev/pxp_device -> model); use-g2d=true Weston composites through it",
+      blocks: ["PXP (G2D 2D engine)"] }
+  - { label: "LPUART ×8", tier: A,
+      evidence: "Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact",
+      blocks: ["LPUART x8"] }
+  - { label: "LPSPI ×8", tier: A,
+      evidence: "Per-bus SSI master; is25lp064 JEDEC byte-exact; drives board-to-board SPI (spi-link)",
+      blocks: ["LPSPI x8"] }
+  - { label: "LPI2C ×8 (+ PMIC/expanders)", tier: A,
+      evidence: "-device …,bus=lpi2cN enumerated + read byte-exact; drives board-to-board I2C (i2c-link)",
+      blocks: ["LPI2C x8"] }
+  - { label: "FlexCAN ×2", tier: A,
+      evidence: "can0 up; frame round-trip; board-to-board (can-host-chardev)",
+      blocks: ["FlexCAN / CAN bus"] }
+  - { label: "ChipIdea USB host (ci_hdrc)", tier: A,
+      evidence: "usb-storage/usb-kbd enumerate; usbredir host — bulk-echo + CDC /dev/ttyACM0 byte-exact",
+      blocks: ["USB (Chipidea host)"] }
+  - { label: "Clocks / power — CCM / ANATOP / SRC", tier: B,
+      evidence: "Linux programs directly (no System Manager)",
+      blocks: ["CCM / ANATOP / SRC / power"] }
+  - { label: "Enclave + fuses + timers — ELE/OCOTP/BBNSM/SEMA42, SYSCTR/TPM/WDOG/TMU", tier: B,
+      evidence: "Drivers bind; registers/IRQ/timing correct (ELE carries an opt-in honest-fault rail)",
+      blocks: ["OCOTP / ELE / BBNSM / SEMA42", "SYSCTR / TSTMR / TPM / WDOG / TMU"] }
+  - { label: "Media Block Control", tier: B,
+      evidence: "MEDIAMIX block-ctrl GPR + SRC power slice for the display/camera path",
+      blocks: ["Media Block Control"] }
+  - { label: "MICFIL (PDM mic) / XCVR (SPDIF)", tier: B,
+      evidence: "ALSA cards register; driver bring-up",
+      blocks: ["MICFIL (PDM mic) / XCVR"] }
+  - { label: "I3C1 (Silvaco) · FlexIO-as-I²C", tier: B,
+      evidence: "I3C master bridges to legacy-I2C (wm8962-on-I3C registers); FlexIO drives an extra I2C master (qtest)",
+      blocks: ["I3C1 (Silvaco)", "FlexIO"] }
+  - { label: "FlexSPI", tier: B,
+      evidence: "qtest (NOR bring-up)",
+      blocks: ["FlexSPI"] }
+  - { label: "GPIO / PMIC · ADC", tier: B,
+      evidence: "Poweroff, GPIO-idle-HIGH, PMIC over I2C; ADC driver bring-up",
+      blocks: ["GPIO / PMIC", "ADC"] }
+
+readme_absent:
+  - { label: "System Manager (SM/SCMI)",
+      reason: "i.MX 91/93 have none; Linux programs CCM/ANATOP/SRC directly (vs the i.MX 95)",
+      blocks: ["System Manager / SCMI"] }
+  - { label: "Hardware JPEG/video codec (CAST)",
+      reason: "i.MX 95-only; on the i.MX 93 multimedia is software on the A55s (GStreamer proves the path)",
+      blocks: ["Hardware JPEG (CAST)"] }
+  - { label: "3D GPU (compute)",
+      reason: "No emulatable GPU compute; Weston is software-rendered (the 2D PXP is present)",
+      blocks: ["GPU (compute)"] }
 
 caveats:
   - area: "M33 concurrent boot"

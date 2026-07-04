@@ -79,6 +79,7 @@ _Status column source: real meson testlog._
 | FlexCAN / CAN bus | A | — | Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93 | can-host-chardev bridges a can-bus to a chardev — no host vcan/SocketCAN needed |
 | GPIO / PMIC | B | — | Poweroff, GPIO-idle-HIGH; PMIC over I2C |  |
 | ADC | B | — | Driver bring-up |  |
+| I3C1 (Silvaco) | B | — | I3C master bridges to legacy-I2C; wm8962-on-I3C audio card probes over it |  |
 
 ## Not present on this SoC (N/A — documented)
 

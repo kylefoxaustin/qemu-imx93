@@ -96,25 +96,31 @@ verified (real data moves, integrity-checked) · **B** driver bring-up (binds,
 registers/IRQ/timing correct) · **N/A** absent on i.MX 93 silicon (never a
 failure).
 
+<!-- BEGIN capability-table (generated from test-matrix.yaml) -->
 | Subsystem | Tier | Evidence |
 |---|:--:|---|
-| Dual Cortex-A55 SMP, GICv3 | A | Boots NXP + mainline Linux to a shell on `ttyLP0`; clean PSCI power-off |
-| Cortex-M33 + A55↔M33 RPMsg (MU1) | A | Real NXP FreeRTOS firmware; `rpmsg_lite` ping-pong round-trips over shared vrings |
-| Ethos-U65 microNPU | A | **Bit-exact int8 inference** in-QEMU — `hw/npu/` executor runs the Vela command stream (mlw decode, conv/dw/pool/elementwise, gemmlowp requant); output matches host TFLite; 19 unit + 12 qtest subtests |
-| eDMA1 / eDMA2 | A | Real TCD execution — LPI2C EDID read, cyclic scatter-gather audio pacing, per-`CHn_MUX` routing |
-| Networking — FEC (`eth0`) + eQOS/dwmac4 (`eth1`) | A | Both DHCP; real frames; **board-to-board** byte-exact |
-| Storage — uSDHC | A | SDHCI ADMA; ext4 `mmcblk0` r/w/sync from `-drive if=sd` |
-| Display — LCDIFv3 → DSI → ADV7535 → HDMI (+ LVDS) | A | 1920×1080 `/dev/fb0`, framebuffer scanned out + screendump byte-correct; fbcon login |
-| Camera — MT9M114/OV5640 → CSI → ISI → V4L2 | A | 5/5 byte-checked frames off `/dev/video0` (parallel + MIPI-CSI2); host-image "virtual camera" |
-| Audio — SAI3/WM8962 play + capture, MICFIL PDM, XCVR/SPDIF | A | Real PCM via cyclic eDMA2; `-audio driver=wav` captures a played square wave byte-correct; concurrent streams |
-| PXP 2D (G2D) | A | copy/fill/blit/src-over-blend/rotate byte-exact (`libg2d` → `/dev/pxp_device` → model); `use-g2d=true` Weston composites through it |
-| LPUART ×8 | A | Serial console; DMA-mode RX (cyclic eDMA); **board-to-board** byte-exact |
-| LPSPI ×8 | A | Per-bus SSI master; `is25lp064` JEDEC byte-exact; drives **board-to-board SPI** (spi-link) |
-| LPI2C ×8 (+ PMIC/expanders), FlexIO-as-I²C | A | `-device …,bus=lpi2cN` enumerated + read byte-exact; drives **board-to-board I²C** (i2c-link) |
-| FlexCAN ×2 | A | `can0` up; frame round-trip; **board-to-board** (can-host-chardev) |
-| ChipIdea USB host (`ci_hdrc`) | A | `usb-storage`/`usb-kbd` enumerate; usbredir host — **bulk-echo + CDC `/dev/ttyACM0`** byte-exact |
-| I3C1 (Silvaco) | B | I3C master bridges to legacy-I²C; wm8962-on-I3C audio card registers |
-| CCM/ANATOP/SRC/power, ELE, OCOTP/BBNSM/SEMA42, SYSCTR/TMU/WDOG, MICFIL/XCVR, GPIO/PMIC, FlexSPI, ADC | B | Drivers bind; registers/IRQ/timing correct (ELE + NPU carry opt-in honest-fault rails) |
+| Dual Cortex-A55 SMP, GICv3 | A | Boots NXP + mainline Linux to a shell on ttyLP0; clean PSCI power-off |
+| Cortex-M33 + A55↔M33 RPMsg (MU1) | A | Real NXP FreeRTOS firmware; rpmsg_lite ping-pong round-trips over shared vrings |
+| Ethos-U65 microNPU | A | Bit-exact int8 inference in-QEMU (Vela command stream: mlw decode, conv/dw/pool/elementwise, gemmlowp requant); matches host TFLite; 19 unit + 12 qtest subtests |
+| eDMA1 / eDMA2 | A | Real TCD execution - LPI2C EDID read, cyclic scatter-gather audio pacing, per-CHn_MUX routing |
+| Networking — FEC (eth0) + eQOS/dwmac4 (eth1) | A | Both DHCP; real frames; board-to-board byte-exact |
+| Storage — uSDHC | A | SDHCI ADMA; ext4 mmcblk0 r/w/sync from -drive if=sd |
+| Display — LCDIFv3 → DSI → ADV7535 → HDMI (+ LVDS) | A | 1920x1080 /dev/fb0, framebuffer scanned out + screendump byte-correct; fbcon login |
+| Camera — MT9M114/OV5640 → CSI → ISI → V4L2 | A | 5/5 byte-checked frames off /dev/video0 (parallel + MIPI-CSI2); host-image virtual camera |
+| Audio — SAI3/WM8962 play + capture | A | Real PCM via cyclic eDMA2; -audio driver=wav captures a played square wave byte-correct; concurrent streams |
+| PXP 2D (G2D) | A | copy/fill/blit/src-over-blend/rotate byte-exact (libg2d -> /dev/pxp_device -> model); use-g2d=true Weston composites through it |
+| LPUART ×8 | A | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact |
+| LPSPI ×8 | A | Per-bus SSI master; is25lp064 JEDEC byte-exact; drives board-to-board SPI (spi-link) |
+| LPI2C ×8 (+ PMIC/expanders) | A | -device …,bus=lpi2cN enumerated + read byte-exact; drives board-to-board I2C (i2c-link) |
+| FlexCAN ×2 | A | can0 up; frame round-trip; board-to-board (can-host-chardev) |
+| ChipIdea USB host (ci_hdrc) | A | usb-storage/usb-kbd enumerate; usbredir host — bulk-echo + CDC /dev/ttyACM0 byte-exact |
+| Clocks / power — CCM / ANATOP / SRC | B | Linux programs directly (no System Manager) |
+| Enclave + fuses + timers — ELE/OCOTP/BBNSM/SEMA42, SYSCTR/TPM/WDOG/TMU | B | Drivers bind; registers/IRQ/timing correct (ELE carries an opt-in honest-fault rail) |
+| Media Block Control | B | MEDIAMIX block-ctrl GPR + SRC power slice for the display/camera path |
+| MICFIL (PDM mic) / XCVR (SPDIF) | B | ALSA cards register; driver bring-up |
+| I3C1 (Silvaco) · FlexIO-as-I²C | B | I3C master bridges to legacy-I2C (wm8962-on-I3C registers); FlexIO drives an extra I2C master (qtest) |
+| FlexSPI | B | qtest (NOR bring-up) |
+| GPIO / PMIC · ADC | B | Poweroff, GPIO-idle-HIGH, PMIC over I2C; ADC driver bring-up |
 
 **Absent on i.MX 93 silicon — N/A (never a failure):**
 
@@ -122,7 +128,8 @@ failure).
 |---|---|
 | System Manager (SM/SCMI) | i.MX 91/93 have none; Linux programs CCM/ANATOP/SRC directly (vs the i.MX 95) |
 | Hardware JPEG/video codec (CAST) | i.MX 95-only; on the i.MX 93 multimedia is software on the A55s (GStreamer proves the path) |
-| 3D GPU (compute) | No emulatable GPU compute; Weston is software-rendered (Mesa softpipe / pixman) — the 2D PXP is present |
+| 3D GPU (compute) | No emulatable GPU compute; Weston is software-rendered (the 2D PXP is present) |
+<!-- END capability-table (generated from test-matrix.yaml) -->
 
 **SoC identity is correct.** The chip id reports `i.MX93`, rev 1.0; no downstream
 `0x9300` artifact leaks. The machine also runs the BSP's variant DTBs (i3c, flexio,
