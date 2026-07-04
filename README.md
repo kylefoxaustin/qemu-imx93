@@ -137,6 +137,8 @@ boards hook up over a stock QEMU socket, no host kernel/root. Every link has a
 byte-exact oracle. Harness:
 [`tests/interconnect-imx93/`](tests/interconnect-imx93/).
 
+![The six board-to-board transports — ETH · USB · UART · SPI · CAN · I2C — each byte-exact between two emulated i.MX 93s over a QEMU socket](docs/images/imx93_hero_sixbus.png)
+
 | Transport | Shape | Status |
 |---|---|:--:|
 | **Ethernet** | two 93s, FEC `eth0` over `-nic socket` | PASS |
