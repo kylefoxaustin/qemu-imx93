@@ -352,25 +352,6 @@ static void edma_drain_armed_rx(IMX93EdmaState *s)
     }
 }
 
-static void edma_trace_tcd(IMX93EdmaState *s, int ch)
-{
-    IMX93EdmaChan *c = &s->chan[ch];
-    uint8_t *t = c->regs;
-
-    if (!getenv("EDMA_DBG")) {
-        return;
-    }
-    fprintf(stderr, "[edma] ch%d ERQ sbr=0x%08x mux=0x%08x csr(tcd)=0x%04x "
-            "saddr=0x%08x daddr=0x%08x soff=%d doff=%d nbytes=0x%x "
-            "citer=%u biter=%u dlast=0x%08x\n", ch,
-            ld32(t + CH_SBR), ld32(t + CH_MUX), ld16(t + TCD_CSR),
-            ld32(t + TCD_SADDR), ld32(t + TCD_DADDR),
-            (int16_t)ld16(t + TCD_SOFF), (int16_t)ld16(t + TCD_DOFF),
-            ld32(t + TCD_NBYTES) & 0x3fffffff,
-            ld16(t + TCD_CITER) & ITER_MASK, ld16(t + TCD_BITER) & ITER_MASK,
-            ld32(t + TCD_DLAST));
-}
-
 /* CH_CSR was written with ERQ set: arm or run the channel. */
 static void edma_trigger(IMX93EdmaState *s, int ch)
 {
@@ -378,8 +359,6 @@ static void edma_trigger(IMX93EdmaState *s, int ch)
     uint32_t sbr = ld32(c->regs + CH_SBR);
     int16_t soff = (int16_t)ld16(c->regs + TCD_SOFF);
     bool is_rx;
-
-    edma_trace_tcd(s, ch);
 
     /*
      * Scatter/gather (ESG) means a cyclic, peripheral-paced transfer (audio):
@@ -557,6 +536,7 @@ static const VMStateDescription vmstate_imx93_edma_chan = {
     .fields = (const VMStateField[]) {
         VMSTATE_UINT8_ARRAY(regs, IMX93EdmaChan, IMX93_EDMA_CHAN_REGS_SZ),
         VMSTATE_BOOL(armed, IMX93EdmaChan),
+        VMSTATE_BOOL(cyclic, IMX93EdmaChan),
         VMSTATE_END_OF_LIST()
     },
 };
