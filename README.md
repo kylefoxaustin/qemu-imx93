@@ -195,7 +195,10 @@ The recurring lesson: a green deterministic qtest is *not* validation for a mode
 with no live workload — the FlexIO IRQ-storm fix and the LPSPI PARAM/FCF fixes
 only surfaced against a real-driver repro. Fidelity judgments (the NPU honest-fault
 discipline, the PXP scale/CSC boundary) live in
-[`docs/validation/fidelity-audit.md`](docs/validation/fidelity-audit.md).
+[`docs/validation/fidelity-audit.md`](docs/validation/fidelity-audit.md). The
+pre-submission pipeline that takes the machine series from working-branch to
+send-ready follows the fleet-canonical
+[upstream-submission playbook](docs/imx93/upstream-submission-playbook.md).
 
 ## Required artifacts
 
