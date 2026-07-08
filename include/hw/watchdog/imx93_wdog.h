@@ -29,7 +29,6 @@ struct IMX93WdogState {
     uint32_t win;           /* window value */
     bool unlocked;          /* UNLOCK sequence accepted, config writable */
     bool rcs;               /* reconfiguration succeeded */
-    int64_t deadline;       /* ns at which an unfed watchdog expires */
 };
 
 #endif /* HW_WATCHDOG_IMX93_WDOG_H */

@@ -60,7 +60,7 @@ static const struct {
     [FSL_IMX93_GIC_DIST] = { 0x48000000, 64 * KiB, "gic_dist" },
     [FSL_IMX93_GIC_REDIST] = { 0x48040000, 768 * KiB, "gic_redist" },
 
-    /* On-chip RAM. TODO: confirm exact OCRAM size from RM (512 KiB used). */
+    /* On-chip RAM (OCRAM). */
     [FSL_IMX93_OCRAM] = { 0x20480000, 512 * KiB, "ocram" },
 
     /* LPUART console block. lpuart1/2 in AONMIX, lpuart3 in WAKEUPMIX. */

@@ -47,14 +47,15 @@ static void wdog_arm(IMX93WdogState *s)
 {
     uint32_t rate = wdog_rate(s);
     uint64_t ms;
+    int64_t deadline;
 
     if (!(s->cs & CS_EN) || rate == 0 || s->toval == 0) {
         timer_del(&s->timer);
         return;
     }
     ms = (uint64_t)s->toval * 1000 / rate;
-    s->deadline = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ms * SCALE_MS;
-    timer_mod(&s->timer, s->deadline);
+    deadline = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ms * SCALE_MS;
+    timer_mod(&s->timer, deadline);
 }
 
 static void wdog_expire(void *opaque)

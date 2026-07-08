@@ -60,6 +60,8 @@ static const MemoryRegionOps sema42_ops = {
     .read = sema42_read,
     .write = sema42_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
+    /* Each gate is a byte register; split wider accesses per-gate. */
+    .impl = { .min_access_size = 1, .max_access_size = 1 },
     .valid = { .min_access_size = 1, .max_access_size = 4 },
 };
 
