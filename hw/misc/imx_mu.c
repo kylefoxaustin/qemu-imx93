@@ -5,14 +5,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * Implements the subset of the V2 MU register set exercised by U-Boot
- * SPL's imx_mu_init_generic() probe path and by SCMI mailbox traffic:
- * CR/SR/GCR/GSR/GIER/TCR/TSR/RCR/RSR + 4 TR/RR data registers, plus
- * a doorbell mechanism via GCR.GIRn / GSR.GIPn.
+ * Implements the subset of the V2 MU register set exercised by the Linux
+ * imx-mailbox driver for A55<->M33 messaging: CR/SR/GCR/GSR/GIER/TCR/TSR/
+ * RCR/RSR + 4 TR/RR data registers, plus a doorbell mechanism via
+ * GCR.GIRn / GSR.GIPn. Two endpoints are linked as peers (the MUA and MUB
+ * sides of one physical MU); a TR write or GCR doorbell on one side is
+ * delivered to the other.
  *
- * v0.1 scope: enough for the SPL probe to succeed and for an SCMI
- * server stub (separate device) to handshake on doorbells. No
- * cross-domain interrupt routing, no flag-bit semantics beyond
+ * Scope: no cross-domain interrupt routing, no flag-bit semantics beyond
  * read/write-back, no per-channel TX/RX FIFO depth modelling.
  */
 
@@ -95,22 +95,6 @@ void imx_mu_assert_gip(IMXMUState *s, unsigned int idx)
     }
     s->gsr |= IMX_MU_V2_BIT(idx);
     imx_mu_update_irq(s);
-}
-
-void imx_mu_set_doorbell_handler(IMXMUState *s,
-                                 IMXMUDoorbellHandler handler,
-                                 void *opaque)
-{
-    s->doorbell_handler = handler;
-    s->doorbell_opaque  = opaque;
-}
-
-void imx_mu_set_tr_write_handler(IMXMUState *s,
-                                 IMXMUTRWriteHandler handler,
-                                 void *opaque)
-{
-    s->tr_write_handler = handler;
-    s->tr_write_opaque  = opaque;
 }
 
 void imx_mu_set_peer(IMXMUState *s, IMXMUState *peer)
@@ -240,10 +224,7 @@ static void imx_mu_write(void *opaque, hwaddr offset,
          *    is correct for a mailbox with nothing on the far side.
          */
         s->tsr &= ~IMX_MU_V2_BIT(idx);
-        if (s->tr_write_handler) {
-            s->tr_write_handler(s->tr_write_opaque, idx, value);
-            s->tsr |= IMX_MU_V2_BIT(idx);
-        } else if (s->peer) {
+        if (s->peer) {
             imx_mu_deliver_rr(s->peer, idx, (uint32_t)value);
         }
         imx_mu_update_irq(s);
@@ -302,18 +283,14 @@ static void imx_mu_write(void *opaque, hwaddr offset,
     case IMX_MU_GCR: {
         /*
          * GCR.GIRn writes are doorbell triggers. Detect 0->1 transitions
-         * and, for each newly-asserted channel, deliver the doorbell. The
-         * bit is auto-cleared afterwards (write-1-to-trigger pulse),
-         * mirroring real HW where the request clears once the peer ACKs.
-         *
-         * Two delivery modes:
-         *  - peer linked (the other side of a real MU): latch the matching
-         *    GSR.GIPn on the peer and recompute the peer's IRQ. GIPn latches
-         *    regardless of the peer's GIER, so a doorbell that arrives before
-         *    the peer enables GIER.GIEn fires the moment it does (the peer's
-         *    GIER write recomputes the IRQ) - real pending-vs-enable HW.
-         *  - doorbell handler (the C-stub SCMI/ELE responders): invoke it
-         *    synchronously to consume the request.
+         * and, for each newly-asserted channel, deliver the doorbell to the
+         * linked peer: latch the matching GSR.GIPn on the peer and recompute
+         * the peer's IRQ. The bit is auto-cleared afterwards (write-1-to-
+         * trigger pulse), mirroring real HW where the request clears once the
+         * peer ACKs. GIPn latches regardless of the peer's GIER, so a doorbell
+         * that arrives before the peer enables GIER.GIEn fires the moment it
+         * does (the peer's GIER write recomputes the IRQ) - real
+         * pending-vs-enable HW. An unlinked MU simply drops the trigger.
          */
         uint32_t mask  = (1u << IMX_MU_NUM_CHANNELS) - 1u;
         uint32_t newly = (value & ~s->gcr) & mask;
@@ -325,9 +302,6 @@ static void imx_mu_write(void *opaque, hwaddr offset,
             if (s->peer) {
                 s->peer->gsr |= IMX_MU_V2_BIT(i);
                 imx_mu_update_irq(s->peer);
-                s->gcr &= ~IMX_MU_V2_BIT(i);
-            } else if (s->doorbell_handler) {
-                s->doorbell_handler(s->doorbell_opaque, i);
                 s->gcr &= ~IMX_MU_V2_BIT(i);
             }
         }

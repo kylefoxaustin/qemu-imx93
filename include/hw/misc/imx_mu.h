@@ -51,24 +51,6 @@ OBJECT_DECLARE_SIMPLE_TYPE(IMXMUState, IMX_MU)
 /* CR.RST clears all state when written (V2 bit 0). */
 #define IMX_MU_CR_RST           BIT(0)
 
-/*
- * Optional callback invoked when the guest writes a 0->1 transition
- * on any GCR.GIRn bit (a doorbell trigger from the agent side). The
- * SCMI server stub registers itself here to process inbound SCMI
- * messages. Unset by default; the model functions as a plain register
- * file when no handler is registered.
- */
-typedef void (*IMXMUDoorbellHandler)(void *opaque, unsigned int idx);
-
-/*
- * Optional callback invoked when the guest writes to a TR[idx] register.
- * The ELE responder stub uses this to accumulate incoming ELE-protocol
- * message words and react when a full message has arrived. Unset by
- * default; the model is a plain register file with no consumer.
- */
-typedef void (*IMXMUTRWriteHandler)(void *opaque, unsigned int idx,
-                                    uint32_t value);
-
 struct IMXMUState {
     SysBusDevice    parent_obj;
 
@@ -93,37 +75,16 @@ struct IMXMUState {
     uint32_t        tr[IMX_MU_NUM_CHANNELS];
     uint32_t        rr[IMX_MU_NUM_CHANNELS];
 
-    /* Doorbell forwarding (see typedef above). */
-    IMXMUDoorbellHandler doorbell_handler;
-    void                *doorbell_opaque;
-
-    /* TR-write forwarding (see typedef above). */
-    IMXMUTRWriteHandler  tr_write_handler;
-    void                *tr_write_opaque;
-
     /*
-     * Optional peer MU endpoint (the other side of a real hardware MU).
-     * When set, a GCR.GIRn doorbell trigger on this side latches the
-     * matching GSR.GIPn on the peer (raising the peer's IRQ once the peer
-     * enables GIER.GIEn), instead of invoking doorbell_handler. This models
-     * the A55-side (MUA) <-> M33-side (MUB) cross-connect used to let the
-     * real SM firmware service the A55's SCMI traffic.
+     * Peer MU endpoint (the other side of a real hardware MU). When set, a
+     * GCR.GIRn doorbell trigger on this side latches the matching GSR.GIPn on
+     * the peer (raising the peer's IRQ once the peer enables GIER.GIEn), and a
+     * TR[idx] write is delivered into the peer's RR[idx]. This models the
+     * A55-side (MUA) <-> M33-side (MUB) cross-connect. An unlinked MU behaves
+     * as a plain register file with nothing on the far side.
      */
     IMXMUState          *peer;
 };
-
-/*
- * Register a doorbell handler. Replaces any previously registered
- * handler. Call with handler = NULL to deregister.
- */
-void imx_mu_set_doorbell_handler(IMXMUState *s,
-                                 IMXMUDoorbellHandler handler,
-                                 void *opaque);
-
-/* Register a TR-write handler. NULL to deregister. */
-void imx_mu_set_tr_write_handler(IMXMUState *s,
-                                 IMXMUTRWriteHandler handler,
-                                 void *opaque);
 
 /*
  * Link two MU endpoints as hardware peers (the MUA and MUB sides of one
