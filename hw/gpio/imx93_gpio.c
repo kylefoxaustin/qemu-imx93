@@ -67,6 +67,9 @@ static uint64_t imx93_gpio_read(void *opaque, hwaddr offset, unsigned size)
     case PORT_PCR0 ... PORT_PCR_LAST:
         return s->pcr[(offset - PORT_PCR0) / 4];
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }
@@ -101,6 +104,10 @@ static void imx93_gpio_write(void *opaque, hwaddr offset, uint64_t value,
         imx93_gpio_update_irq(s);
         break;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad write offset 0x%" HWADDR_PRIx
+                      " value 0x%" PRIx64 "\n",
+                      __func__, offset, value);
         break;
     }
 }

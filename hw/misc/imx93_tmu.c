@@ -18,6 +18,7 @@
 #include "hw/misc/imx93_tmu.h"
 #include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
+#include "qemu/log.h"
 #include "qemu/module.h"
 
 #define TMU_REG_TMR     0x000   /* mode register */
@@ -53,6 +54,9 @@ static uint64_t tmu_read(void *opaque, hwaddr offset, unsigned size)
             kelvin = 273 + s->temperature / 1000;
             return TRITSR_V | (kelvin & 0x1ff);
         }
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }
@@ -73,6 +77,9 @@ static void tmu_write(void *opaque, hwaddr offset, uint64_t value,
         s->tier = value;
         break;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad write offset 0x%" HWADDR_PRIx
+                      " value 0x%" PRIx64 "\n", __func__, offset, value);
         break;
     }
 }

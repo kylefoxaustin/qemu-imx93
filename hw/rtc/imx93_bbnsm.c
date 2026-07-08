@@ -17,6 +17,7 @@
 #include "hw/rtc/imx93_bbnsm.h"
 #include "hw/core/irq.h"
 #include "migration/vmstate.h"
+#include "qemu/log.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
 #include "qemu/host-utils.h"
@@ -101,6 +102,9 @@ static uint64_t bbnsm_read(void *opaque, hwaddr offset, unsigned size)
     case BBNSM_TA:
         return s->ta;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }
@@ -153,6 +157,9 @@ static void bbnsm_write(void *opaque, hwaddr offset, uint64_t value,
         bbnsm_update_alarm(s);
         break;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad write offset 0x%" HWADDR_PRIx
+                      " value 0x%" PRIx64 "\n", __func__, offset, value);
         break;
     }
 }

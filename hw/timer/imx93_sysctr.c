@@ -19,6 +19,7 @@
 #include "qemu/module.h"
 #include "qemu/timer.h"
 #include "qemu/host-utils.h"
+#include "qemu/log.h"
 
 #define CNTCV_LO    0x00008
 #define CNTCV_HI    0x0000c
@@ -84,6 +85,9 @@ static uint64_t sysctr_read(void *opaque, hwaddr offset, unsigned size)
     case CMPCR:
         return s->cmpcr;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }
@@ -107,6 +111,10 @@ static void sysctr_write(void *opaque, hwaddr offset, uint64_t value,
         sysctr_update(s);
         break;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad write offset 0x%" HWADDR_PRIx
+                      " value 0x%" PRIx64 "\n",
+                      __func__, offset, value);
         break;
     }
 }

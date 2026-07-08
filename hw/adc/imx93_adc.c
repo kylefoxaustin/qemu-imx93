@@ -18,6 +18,7 @@
 #include "hw/adc/imx93_adc.h"
 #include "hw/core/irq.h"
 #include "migration/vmstate.h"
+#include "qemu/log.h"
 #include "qemu/module.h"
 
 #define ADC_MCR     0x00
@@ -79,6 +80,9 @@ static uint64_t adc_read(void *opaque, hwaddr offset, unsigned size)
         if (offset >= ADC_PCDR0 && offset < ADC_PCDR0 + 4 * IMX93_ADC_NCH) {
             return s->pcdr[(offset - ADC_PCDR0) / 4];
         }
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }
@@ -108,6 +112,10 @@ static void adc_write(void *opaque, hwaddr offset, uint64_t value,
         s->ncmr0 = value;
         break;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad write offset 0x%" HWADDR_PRIx
+                      " value 0x%" PRIx64 "\n",
+                      __func__, offset, value);
         break;
     }
 }

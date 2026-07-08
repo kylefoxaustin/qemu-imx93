@@ -16,6 +16,7 @@
 #include "qemu/module.h"
 #include "qemu/timer.h"
 #include "qemu/host-utils.h"
+#include "qemu/log.h"
 
 #define TSTMR_L  0x0
 #define TSTMR_H  0x4
@@ -41,6 +42,9 @@ static uint64_t tstmr_read(void *opaque, hwaddr offset, unsigned size)
     case TSTMR_H:
         return s->latched_hi;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }

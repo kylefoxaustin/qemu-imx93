@@ -18,6 +18,7 @@
 #include "migration/vmstate.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
+#include "qemu/log.h"
 #include "system/watchdog.h"
 
 #define WDOG_CS     0x0
@@ -82,6 +83,9 @@ static uint64_t wdog_read(void *opaque, hwaddr offset, unsigned size)
     case WDOG_WIN:
         return s->win;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }
@@ -119,6 +123,10 @@ static void wdog_write(void *opaque, hwaddr offset, uint64_t value,
         }
         break;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad write offset 0x%" HWADDR_PRIx
+                      " value 0x%" PRIx64 "\n",
+                      __func__, offset, value);
         break;
     }
 }

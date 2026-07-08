@@ -172,6 +172,9 @@ static uint64_t imx_lpi2c_read(void *opaque, hwaddr offset, unsigned size)
             return b;
         }
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }
@@ -209,6 +212,9 @@ static void imx_lpi2c_write(void *opaque, hwaddr offset, uint64_t value,
         imx_lpi2c_mtdr(s, value);
         break;
     default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad write offset 0x%" HWADDR_PRIx
+                      " value 0x%" PRIx64 "\n", __func__, offset, value);
         break;
     }
 }

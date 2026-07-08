@@ -16,6 +16,7 @@
 #include "qemu/osdep.h"
 #include "hw/timer/imx93_tpm.h"
 #include "migration/vmstate.h"
+#include "qemu/log.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
 #include "qemu/host-utils.h"
@@ -68,6 +69,9 @@ static uint64_t tpm_read(void *opaque, hwaddr offset, unsigned size)
 
             return ((offset - TPM_C0SC) & 4) ? s->cnv[n] : s->cnsc[n];
         }
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: bad read offset 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         return 0;
     }
 }
@@ -110,6 +114,11 @@ static void tpm_write(void *opaque, hwaddr offset, uint64_t value,
             } else {
                 s->cnsc[n] = value;
             }
+        } else {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "%s: bad write offset 0x%" HWADDR_PRIx
+                          " value 0x%" PRIx64 "\n",
+                          __func__, offset, value);
         }
         break;
     }
