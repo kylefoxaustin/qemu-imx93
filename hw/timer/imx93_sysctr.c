@@ -118,9 +118,9 @@ static const MemoryRegionOps sysctr_ops = {
     .valid = { .min_access_size = 4, .max_access_size = 4 },
 };
 
-static void sysctr_reset(DeviceState *dev)
+static void sysctr_reset_hold(Object *obj, ResetType type)
 {
-    IMX93SysctrState *s = IMX93_SYSCTR(dev);
+    IMX93SysctrState *s = IMX93_SYSCTR(obj);
 
     s->cmpcr = 0;
     s->cmpcv = 0;
@@ -153,10 +153,11 @@ static const VMStateDescription vmstate_sysctr = {
 static void sysctr_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = sysctr_realize;
     dc->vmsd = &vmstate_sysctr;
-    device_class_set_legacy_reset(dc, sysctr_reset);
+    rc->phases.hold = sysctr_reset_hold;
     dc->desc = "i.MX93 system counter";
 }
 

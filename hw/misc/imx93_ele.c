@@ -194,9 +194,9 @@ static const MemoryRegionOps imx93_ele_ops = {
     .valid = { .min_access_size = 4, .max_access_size = 4 },
 };
 
-static void imx93_ele_reset(DeviceState *dev)
+static void imx93_ele_reset_hold(Object *obj, ResetType type)
 {
-    IMX93EleState *s = IMX93_ELE(dev);
+    IMX93EleState *s = IMX93_ELE(obj);
 
     s->gier = s->gcr = s->tcr = s->rcr = 0;
     s->txn = s->msg_size = 0;
@@ -239,9 +239,10 @@ static const VMStateDescription vmstate_imx93_ele = {
 static void imx93_ele_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+    ResettableClass *rc = RESETTABLE_CLASS(oc);
 
     dc->desc = "i.MX 93 ELE (EdgeLock Enclave) MU responder";
-    device_class_set_legacy_reset(dc, imx93_ele_reset);
+    rc->phases.hold = imx93_ele_reset_hold;
     dc->vmsd = &vmstate_imx93_ele;
 }
 

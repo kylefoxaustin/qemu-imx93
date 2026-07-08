@@ -67,6 +67,17 @@ static void tstmr_realize(DeviceState *dev, Error **errp)
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
 }
 
+static void tstmr_reset_hold(Object *obj, ResetType type)
+{
+    IMX93TstmrState *s = IMX93_TSTMR(obj);
+
+    /*
+     * The count is free-running (derived from the virtual clock); only the
+     * software-visible HIGH latch is stored state.
+     */
+    s->latched_hi = 0;
+}
+
 static const VMStateDescription vmstate_tstmr = {
     .name = TYPE_IMX93_TSTMR,
     .version_id = 1,
@@ -80,8 +91,10 @@ static const VMStateDescription vmstate_tstmr = {
 static void tstmr_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = tstmr_realize;
+    rc->phases.hold = tstmr_reset_hold;
     dc->vmsd = &vmstate_tstmr;
     dc->desc = "i.MX93 timestamp timer";
 }

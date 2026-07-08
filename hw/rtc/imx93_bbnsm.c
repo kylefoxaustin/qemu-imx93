@@ -164,9 +164,9 @@ static const MemoryRegionOps bbnsm_ops = {
     .valid = { .min_access_size = 4, .max_access_size = 4 },
 };
 
-static void bbnsm_reset(DeviceState *dev)
+static void bbnsm_reset_hold(Object *obj, ResetType type)
 {
-    IMX93BbnsmState *s = IMX93_BBNSM(dev);
+    IMX93BbnsmState *s = IMX93_BBNSM(obj);
 
     s->ctrl = 0;
     s->int_en = 0;
@@ -214,10 +214,11 @@ static const VMStateDescription vmstate_bbnsm = {
 static void bbnsm_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = bbnsm_realize;
     dc->vmsd = &vmstate_bbnsm;
-    device_class_set_legacy_reset(dc, bbnsm_reset);
+    rc->phases.hold = bbnsm_reset_hold;
     dc->desc = "i.MX93 BBNSM RTC";
 }
 

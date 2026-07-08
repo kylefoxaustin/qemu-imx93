@@ -129,9 +129,9 @@ static const MemoryRegionOps wdog_ops = {
     .valid = { .min_access_size = 4, .max_access_size = 4 },
 };
 
-static void wdog_reset(DeviceState *dev)
+static void wdog_reset_hold(Object *obj, ResetType type)
 {
-    IMX93WdogState *s = IMX93_WDOG(dev);
+    IMX93WdogState *s = IMX93_WDOG(obj);
 
     /*
      * Default disabled (no bootloader ran to enable it under QEMU), but with
@@ -174,10 +174,11 @@ static const VMStateDescription vmstate_wdog = {
 static void wdog_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = wdog_realize;
     dc->vmsd = &vmstate_wdog;
-    device_class_set_legacy_reset(dc, wdog_reset);
+    rc->phases.hold = wdog_reset_hold;
     dc->desc = "i.MX93 watchdog";
 }
 

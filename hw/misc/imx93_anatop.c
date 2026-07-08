@@ -86,9 +86,9 @@ static const MemoryRegionOps imx93_anatop_ops = {
     },
 };
 
-static void imx93_anatop_reset(DeviceState *dev)
+static void imx93_anatop_reset_hold(Object *obj, ResetType type)
 {
-    IMX93AnatopState *s = IMX93_ANATOP(dev);
+    IMX93AnatopState *s = IMX93_ANATOP(obj);
 
     memset(s->regs, 0, sizeof(s->regs));
 }
@@ -115,9 +115,10 @@ static const VMStateDescription vmstate_imx93_anatop = {
 static void imx93_anatop_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+    ResettableClass *rc = RESETTABLE_CLASS(oc);
 
     dc->desc = "i.MX 93 ANATOP (PLLs)";
-    device_class_set_legacy_reset(dc, imx93_anatop_reset);
+    rc->phases.hold = imx93_anatop_reset_hold;
     dc->vmsd = &vmstate_imx93_anatop;
 }
 

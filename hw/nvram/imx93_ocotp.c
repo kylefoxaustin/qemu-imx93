@@ -58,9 +58,9 @@ static const MemoryRegionOps ocotp_ops = {
     .valid = { .min_access_size = 1, .max_access_size = 4 },
 };
 
-static void ocotp_reset(DeviceState *dev)
+static void ocotp_reset_hold(Object *obj, ResetType type)
 {
-    IMX93OcotpState *s = IMX93_OCOTP(dev);
+    IMX93OcotpState *s = IMX93_OCOTP(obj);
     /* NXP OUI 00:04:9f; low bytes arbitrary but stable. */
     static const uint8_t mac1[6] = { 0x00, 0x04, 0x9f, 0x93, 0x00, 0x01 };
     static const uint8_t mac2[6] = { 0x00, 0x04, 0x9f, 0x93, 0x00, 0x02 };
@@ -96,10 +96,11 @@ static const VMStateDescription vmstate_ocotp = {
 static void ocotp_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = ocotp_realize;
     dc->vmsd = &vmstate_ocotp;
-    device_class_set_legacy_reset(dc, ocotp_reset);
+    rc->phases.hold = ocotp_reset_hold;
     dc->desc = "i.MX93 OCOTP fuse controller";
 }
 

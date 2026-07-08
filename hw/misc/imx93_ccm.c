@@ -105,9 +105,9 @@ static const MemoryRegionOps imx93_ccm_ops = {
     },
 };
 
-static void imx93_ccm_reset(DeviceState *dev)
+static void imx93_ccm_reset_hold(Object *obj, ResetType type)
 {
-    IMX93CCMState *s = IMX93_CCM(dev);
+    IMX93CCMState *s = IMX93_CCM(obj);
 
     memset(s->regs, 0, sizeof(s->regs));
 }
@@ -134,9 +134,10 @@ static const VMStateDescription vmstate_imx93_ccm = {
 static void imx93_ccm_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+    ResettableClass *rc = RESETTABLE_CLASS(oc);
 
     dc->desc = "i.MX 93 Clock Control Module";
-    device_class_set_legacy_reset(dc, imx93_ccm_reset);
+    rc->phases.hold = imx93_ccm_reset_hold;
     dc->vmsd = &vmstate_imx93_ccm;
 }
 

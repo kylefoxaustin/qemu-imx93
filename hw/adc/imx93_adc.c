@@ -119,9 +119,9 @@ static const MemoryRegionOps adc_ops = {
     .valid = { .min_access_size = 4, .max_access_size = 4 },
 };
 
-static void adc_reset(DeviceState *dev)
+static void adc_reset_hold(Object *obj, ResetType type)
 {
-    IMX93AdcState *s = IMX93_ADC(dev);
+    IMX93AdcState *s = IMX93_ADC(obj);
 
     s->mcr = MCR_PWDN;      /* powered down until the driver enables it */
     s->isr = 0;
@@ -157,10 +157,11 @@ static const VMStateDescription vmstate_adc = {
 static void adc_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = adc_realize;
     dc->vmsd = &vmstate_adc;
-    device_class_set_legacy_reset(dc, adc_reset);
+    rc->phases.hold = adc_reset_hold;
     dc->desc = "i.MX93 SAR-ADC";
 }
 

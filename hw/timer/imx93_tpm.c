@@ -122,9 +122,9 @@ static const MemoryRegionOps tpm_ops = {
     .valid = { .min_access_size = 4, .max_access_size = 4 },
 };
 
-static void tpm_reset(DeviceState *dev)
+static void tpm_reset_hold(Object *obj, ResetType type)
 {
-    IMX93TpmState *s = IMX93_TPM(dev);
+    IMX93TpmState *s = IMX93_TPM(obj);
 
     s->sc = 0;
     s->mod = 0;
@@ -159,10 +159,11 @@ static const VMStateDescription vmstate_tpm = {
 static void tpm_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = tpm_realize;
     dc->vmsd = &vmstate_tpm;
-    device_class_set_legacy_reset(dc, tpm_reset);
+    rc->phases.hold = tpm_reset_hold;
     dc->desc = "i.MX93 timer/PWM module";
 }
 

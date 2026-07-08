@@ -354,9 +354,9 @@ static void imx93_dwmac_phy_reset(IMX93DwmacState *s)
     s->phy[5] = 0x45e1;        /* ANLPAR: partner 100/full */
 }
 
-static void imx93_dwmac_reset(DeviceState *dev)
+static void imx93_dwmac_reset_hold(Object *obj, ResetType type)
 {
-    IMX93DwmacState *s = IMX93_DWMAC(dev);
+    IMX93DwmacState *s = IMX93_DWMAC(obj);
 
     s->mac_config = s->mac_int_en = 0;
     s->mdio_addr = s->mdio_data = 0;
@@ -434,10 +434,11 @@ static const Property imx93_dwmac_props[] = {
 static void imx93_dwmac_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+    ResettableClass *rc = RESETTABLE_CLASS(oc);
 
     dc->desc = "i.MX 93 eQOS (dwmac4) Ethernet";
     dc->realize = imx93_dwmac_realize;
-    device_class_set_legacy_reset(dc, imx93_dwmac_reset);
+    rc->phases.hold = imx93_dwmac_reset_hold;
     dc->vmsd = &vmstate_imx93_dwmac;
     device_class_set_props(dc, imx93_dwmac_props);
 }

@@ -113,9 +113,9 @@ static const MemoryRegionOps imx93_gpio_ops = {
     .valid = { .min_access_size = 4, .max_access_size = 4 },
 };
 
-static void imx93_gpio_reset(DeviceState *dev)
+static void imx93_gpio_reset_hold(Object *obj, ResetType type)
 {
-    IMX93GPIOState *s = IMX93_GPIO(dev);
+    IMX93GPIOState *s = IMX93_GPIO(obj);
 
     s->pdor = s->pddr = s->isfr = 0;
     memset(s->pcr, 0, sizeof(s->pcr));
@@ -149,9 +149,10 @@ static const VMStateDescription vmstate_imx93_gpio = {
 static void imx93_gpio_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+    ResettableClass *rc = RESETTABLE_CLASS(oc);
 
     dc->desc = "i.MX 93 GPIO controller";
-    device_class_set_legacy_reset(dc, imx93_gpio_reset);
+    rc->phases.hold = imx93_gpio_reset_hold;
     dc->vmsd = &vmstate_imx93_gpio;
 }
 

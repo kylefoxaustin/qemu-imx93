@@ -226,9 +226,9 @@ static const MemoryRegionOps imx_lpi2c_ops = {
     .valid = { .min_access_size = 1, .max_access_size = 4 },
 };
 
-static void imx_lpi2c_reset(DeviceState *dev)
+static void imx_lpi2c_reset_hold(Object *obj, ResetType type)
 {
-    IMXLPI2CState *s = IMX_LPI2C(dev);
+    IMXLPI2CState *s = IMX_LPI2C(obj);
 
     s->mcr = s->msr = s->mier = s->mcfgr1 = 0;
     s->transfer_active = false;
@@ -270,10 +270,11 @@ static const VMStateDescription vmstate_imx_lpi2c = {
 static void imx_lpi2c_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+    ResettableClass *rc = RESETTABLE_CLASS(oc);
 
     dc->desc = "i.MX Low Power I2C controller";
     dc->realize = imx_lpi2c_realize;
-    device_class_set_legacy_reset(dc, imx_lpi2c_reset);
+    rc->phases.hold = imx_lpi2c_reset_hold;
     dc->vmsd = &vmstate_imx_lpi2c;
     device_class_set_props(dc, imx_lpi2c_properties);
 }

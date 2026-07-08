@@ -473,9 +473,9 @@ static const MemoryRegionOps imx93_edma_ops = {
     .impl = { .min_access_size = 1, .max_access_size = 4 },
 };
 
-static void imx93_edma_reset(DeviceState *dev)
+static void imx93_edma_reset_hold(Object *obj, ResetType type)
 {
-    IMX93EdmaState *s = IMX93_EDMA(dev);
+    IMX93EdmaState *s = IMX93_EDMA(obj);
 
     memset(s->mgmt, 0, sizeof(s->mgmt));
     for (int i = 0; i < IMX93_EDMA_MAX_CHANNELS; i++) {
@@ -556,11 +556,12 @@ static const VMStateDescription vmstate_imx93_edma = {
 static void imx93_edma_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = imx93_edma_realize;
     dc->vmsd = &vmstate_imx93_edma;
     device_class_set_props(dc, imx93_edma_properties);
-    device_class_set_legacy_reset(dc, imx93_edma_reset);
+    rc->phases.hold = imx93_edma_reset_hold;
     dc->desc = "i.MX93 eDMA v3 controller";
 }
 

@@ -84,9 +84,9 @@ static const MemoryRegionOps tmu_ops = {
     .valid = { .min_access_size = 4, .max_access_size = 4 },
 };
 
-static void tmu_reset(DeviceState *dev)
+static void tmu_reset_hold(Object *obj, ResetType type)
 {
-    IMX93TmuState *s = IMX93_TMU(dev);
+    IMX93TmuState *s = IMX93_TMU(obj);
 
     s->tmr = 0;
     s->tmsr = 0;
@@ -121,10 +121,11 @@ static const Property tmu_properties[] = {
 static void tmu_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = tmu_realize;
     dc->vmsd = &vmstate_tmu;
-    device_class_set_legacy_reset(dc, tmu_reset);
+    rc->phases.hold = tmu_reset_hold;
     device_class_set_props(dc, tmu_properties);
     dc->desc = "i.MX93 thermal monitoring unit";
 }

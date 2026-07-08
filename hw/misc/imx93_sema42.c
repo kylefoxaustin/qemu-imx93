@@ -63,9 +63,9 @@ static const MemoryRegionOps sema42_ops = {
     .valid = { .min_access_size = 1, .max_access_size = 4 },
 };
 
-static void sema42_reset(DeviceState *dev)
+static void sema42_reset_hold(Object *obj, ResetType type)
 {
-    IMX93Sema42State *s = IMX93_SEMA42(dev);
+    IMX93Sema42State *s = IMX93_SEMA42(obj);
 
     memset(s->gate, 0, sizeof(s->gate));
 }
@@ -92,10 +92,11 @@ static const VMStateDescription vmstate_sema42 = {
 static void sema42_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = sema42_realize;
     dc->vmsd = &vmstate_sema42;
-    device_class_set_legacy_reset(dc, sema42_reset);
+    rc->phases.hold = sema42_reset_hold;
     dc->desc = "i.MX93 hardware semaphores";
 }
 
