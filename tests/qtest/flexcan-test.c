@@ -1,7 +1,7 @@
 /*
  * QTest for the NXP FlexCAN controller model (on the i.MX 93 machine).
  *
- * Copyright (c) 2026, Kyle Fox
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *

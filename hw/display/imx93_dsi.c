@@ -1,7 +1,7 @@
 /*
  * NXP i.MX 93 MIPI DSI host (Synopsys DesignWare dw-mipi-dsi core)
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *

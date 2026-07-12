@@ -1,7 +1,7 @@
 /*
  * QTest for the i.MX93 PXP (Pixel Pipeline) 2D engine.
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *

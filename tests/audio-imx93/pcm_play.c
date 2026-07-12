@@ -1,7 +1,7 @@
 /*
  * Minimal ALSA playback oracle for the i.MX93 SAI3/wm8962 card.
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * Plays a generated square wave to an ALSA PCM device (default hw:1,0, the

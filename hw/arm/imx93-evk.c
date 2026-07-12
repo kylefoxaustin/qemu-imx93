@@ -3,7 +3,7 @@
  *
  * Modeled on hw/arm/imx8mp-evk.c (Bernhard Beschow) and the i.MX 95 port.
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *

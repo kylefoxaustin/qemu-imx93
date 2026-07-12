@@ -1,7 +1,7 @@
 /*
  * Arm Ethos-U55/U65 microNPU - feature-map addressing
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */

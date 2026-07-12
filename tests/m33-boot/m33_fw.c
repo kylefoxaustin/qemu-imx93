@@ -7,7 +7,7 @@
  * QEMU-monitor "xp /3xw 0x20200000" shows the magic + a rising counter.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (c) 2026, Kyle Fox
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  */
 #define DTCM_BASE   0x20000000u   /* M33 view of its DTCM */
 #define DTCM_TOP    0x20040000u   /* top of the 256 KiB DTCM (initial SP) */

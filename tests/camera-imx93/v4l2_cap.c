@@ -1,7 +1,7 @@
 /*
  * V4L2 multiplanar MMAP capture oracle for the i.MX93 ISI model.
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * Opens an ISI capture node (the imx8-isi capture device is multiplanar),

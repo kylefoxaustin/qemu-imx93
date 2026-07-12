@@ -1,7 +1,7 @@
 /*
  * Minimal ALSA capture oracle for the i.MX93 SAI3 (wm8962) card.
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * Records from an ALSA PCM device (default hw:1,0, the wm8962/SAI3 card),

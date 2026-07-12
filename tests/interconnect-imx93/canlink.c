@@ -3,7 +3,7 @@
  * canlink - a two-role SocketCAN oracle for the i.MX 95 board-to-board CAN
  * link test (tests/interconnect-imx95/run-can.sh).
  *
- * Copyright (c) 2026, Kyle Fox
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  *
  * Unlike tests/flexcan/cantest (a one-instance loopback self-test), this splits
  * into send/recv roles so two QEMU i.MX 95 instances - each a FlexCAN on a local

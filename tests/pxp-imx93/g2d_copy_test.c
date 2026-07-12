@@ -1,7 +1,7 @@
 /*
  * g2d_copy oracle for the i.MX93 PXP model.
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * Drives a linear PXP copy through the real userspace stack:

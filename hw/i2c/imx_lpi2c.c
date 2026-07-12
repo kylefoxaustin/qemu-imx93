@@ -1,7 +1,7 @@
 /*
  * NXP i.MX Low Power I2C (LPI2C) controller - master mode
  *
- * Copyright (c) 2026, Kyle Fox <kylefoxaustin@github>
+ * Copyright (c) 2026, Kyle Fox <kylefoxaustin@gmail.com>
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
