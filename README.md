@@ -115,7 +115,7 @@ failure).
 | FlexCAN ×2 | A | can0 up; frame round-trip; board-to-board (can-host-chardev) |
 | ChipIdea USB host (ci_hdrc) | A | usb-storage/usb-kbd enumerate; usbredir host — bulk-echo + CDC /dev/ttyACM0 byte-exact |
 | Clocks / power — CCM / ANATOP / SRC | B | Linux programs directly (no System Manager) |
-| Enclave + fuses + timers — ELE/OCOTP/BBNSM/SEMA42, SYSCTR/TPM/WDOG/TMU | B | Drivers bind; registers/IRQ/timing correct (ELE carries an opt-in honest-fault rail) |
+| Enclave + fuses + timers — ELE/OCOTP/BBNSM/SEMA42, SYSCTR/TPM/WDOG/TMU | B | Drivers bind; registers/IRQ/timing correct (ELE serves coordination/probe cmds, returns real host entropy for GET_RANDOM, and honest-faults every other crypto to the guest by default) |
 | Media Block Control | B | MEDIAMIX block-ctrl GPR + SRC power slice for the display/camera path |
 | MICFIL (PDM mic) / XCVR (SPDIF) | B | ALSA cards register; driver bring-up |
 | I3C1 (Silvaco) · FlexIO-as-I²C | B | I3C master bridges to legacy-I2C (wm8962-on-I3C registers); FlexIO drives an extra I2C master (qtest) |
@@ -281,9 +281,15 @@ initramfs and interconnect oracles.
 
 ## Known limitations
 
-- **`fsl-se … Failed to read tamper status` is benign.** The ELE registers fine;
-  the tamper read is an NXP SiP SMC normally serviced by TF-A, absent in a
-  `-kernel` boot. Cosmetic only.
+- **ELE `fsl-se … Failed to …` / `Response Failure = 0x29` lines are the honest
+  fault, not errors.** The ELE responder serves the coordination/probe commands
+  it genuinely reproduces and returns real host-CSPRNG entropy for GET_RANDOM
+  (so `/dev/hwrng` works), but every crypto/HSM op it does not reproduce
+  fails closed to the guest by default — so the driver logs a real failure
+  (e.g. `Failed to initialize ELE HSM services`, `Failed to read tamper
+  status`) instead of being handed a fabricated success. Boot is unaffected.
+  `-global driver=imx93.ele,property=fake-uncomputed-success,value=on` restores
+  the old blanket-success behaviour for debugging.
 - **First-boot time is dominated by initramfs decompression under TCG** — a
   ~430 MB rootfs unpacks to ~1.3 GB tmpfs (~12 s here). Not a hang; a small
   busybox initramfs boots far faster.

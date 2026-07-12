@@ -24,8 +24,11 @@
 #include "qemu/osdep.h"
 #include "hw/misc/imx93_ele.h"
 #include "hw/core/irq.h"
+#include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
+#include "qemu/guest-random.h"
+#include "system/dma.h"
 
 /*
  * Register offsets (s4 MU). NB: the imx_mu_xcr enum is
@@ -49,6 +52,59 @@
 
 #define ELE_RSP_TAG         0xe1
 #define ELE_SUCCESS_IND     0xd6
+#define ELE_FAILURE_IND     0x29    /* any non-0xd6 low byte reads as failure */
+
+/*
+ * ELE command opcodes (se_msg_hdr byte 2), from the Linux fsl-se driver
+ * (drivers/firmware/imx/ele_base_msg.h + ele_fw_api.h). The WHITELIST below is
+ * exactly the set whose real-silicon OUTCOME this model genuinely reproduces:
+ *  - pure coordination, so SUCCESS is honestly true: PING, voltage-change
+ *    start/finish, START_RNG (kicks off the TRNG; produces no bytes here), and
+ *    SERVICE_SWAP (IMEM export/import handshake);
+ *  - info reads where a zero value / guest-zeroed buffer is the CORRECT answer
+ *    for a model with no resident ELE firmware or blown fuses: GET_INFO,
+ *    GET_STATE, GET_FW_VERSION, READ_FUSE.
+ * ELE_GET_RANDOM is special: rather than fake success (fake entropy) OR fail
+ * closed (a dead hwrng), it is COMPUTED CORRECTLY - real host-CSPRNG bytes are
+ * DMA'd into the guest's destination buffer. For an RNG the consumer reads
+ * "success" as "these bytes are entropy", so real randomness is the only honest
+ * answer; deterministic repro is available under QEMU's -seed. Everything else
+ * we cannot reproduce - WRITE_FUSE, FW auth, INIT_FW, unknown - fails closed.
+ */
+#define IMX93_ELE_RNG_MAX_LEN   0x10000  /* clamp guest-supplied length */
+#define ELE_CMD_PING            0x01
+#define ELE_CMD_FW_AUTH         0x02
+#define ELE_CMD_VOLT_START      0x12
+#define ELE_CMD_VOLT_FINISH     0x13
+#define ELE_CMD_INIT_FW         0x17
+#define ELE_CMD_DEBUG_DUMP      0x21
+#define ELE_CMD_READ_FUSE       0x97
+#define ELE_CMD_GET_FW_VERSION  0x9d
+#define ELE_CMD_START_RNG       0xa3
+#define ELE_CMD_GET_STATE       0xb2
+#define ELE_CMD_GET_RANDOM      0xcd    /* returns bytes into a guest buffer */
+#define ELE_CMD_WRITE_FUSE      0xd6
+#define ELE_CMD_GET_INFO        0xda
+#define ELE_CMD_SERVICE_SWAP    0xdf
+
+/* True iff we genuinely reproduce this command's real-silicon outcome. */
+static bool imx93_ele_cmd_reproduced(uint8_t command)
+{
+    switch (command) {
+    case ELE_CMD_PING:              /* coordination: nothing computed */
+    case ELE_CMD_VOLT_START:
+    case ELE_CMD_VOLT_FINISH:
+    case ELE_CMD_START_RNG:         /* starts the TRNG; hands back no bytes */
+    case ELE_CMD_SERVICE_SWAP:      /* IMEM export/import handshake */
+    case ELE_CMD_GET_INFO:          /* info reads: 0 / zeroed buffer is correct */
+    case ELE_CMD_GET_STATE:
+    case ELE_CMD_GET_FW_VERSION:
+    case ELE_CMD_READ_FUSE:
+        return true;
+    default:                        /* GET_RANDOM, WRITE_FUSE, auth, unknown */
+        return false;
+    }
+}
 
 static void imx93_ele_update_irq(IMX93EleState *s)
 {
@@ -82,14 +138,82 @@ static unsigned imx93_ele_rsp_words(uint8_t command)
     }
 }
 
+/*
+ * ELE_GET_RANDOM: fill the guest's destination buffer with real host-CSPRNG
+ * entropy. Message layout (from the Linux ele_get_random / ele_rng_msg_data):
+ * word0 header, word1 flags, word2 destination address, word3 length. The
+ * ele-reserved DMA buffer sits in the low 4 GiB, so a 32-bit address suffices.
+ * We stream via a stack buffer so any length needs no large allocation, and
+ * clamp a guest-supplied length to keep a malformed message bounded.
+ */
+static void imx93_ele_get_random(IMX93EleState *s)
+{
+    uint32_t addr, len, off;
+    uint8_t chunk[256];
+
+    if (s->msg_size < 4) {
+        return;
+    }
+    addr = s->txbuf[2];
+    len = s->txbuf[3];
+    if (len > IMX93_ELE_RNG_MAX_LEN) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: GET_RANDOM length 0x%x clamped to 0x%x\n",
+                      __func__, len, IMX93_ELE_RNG_MAX_LEN);
+        len = IMX93_ELE_RNG_MAX_LEN;
+    }
+    for (off = 0; off < len; off += sizeof(chunk)) {
+        uint32_t n = MIN(len - off, sizeof(chunk));
+        qemu_guest_getrandom_nofail(chunk, n);
+        dma_memory_write(&address_space_memory, addr + off, chunk, n,
+                         MEMTXATTRS_UNSPECIFIED);
+    }
+}
+
 /* A complete command message sits in s->txbuf[0..msg_size-1]; reply. */
 static void imx93_ele_process(IMX93EleState *s)
 {
     uint32_t hdr = s->txbuf[0];
     uint8_t ver = hdr & 0xff;
     uint8_t command = (hdr >> 16) & 0xff;
-    unsigned words = imx93_ele_rsp_words(command);
+    bool reproduced = s->fake_uncomputed_success ||
+                      imx93_ele_cmd_reproduced(command);
+    unsigned words;
     unsigned i;
+
+    /*
+     * GET_RANDOM is computed correctly: hand the guest REAL entropy rather than
+     * a fabricated success (fake entropy) or a failure (dead hwrng). Under the
+     * escape hatch we skip the fill to reproduce the old dishonest behaviour.
+     */
+    if (command == ELE_CMD_GET_RANDOM && !s->fake_uncomputed_success) {
+        imx93_ele_get_random(s);
+        reproduced = true;
+    }
+
+    /*
+     * Fail closed for any command whose outcome we do not reproduce: a
+     * well-formed, NON-GATING reply (the RX interrupt still fires, the driver's
+     * handshake completes and it never hangs) that carries a failure status, so
+     * the caller gets kStatus_Fail instead of a fabricated success. The failure
+     * reply is always header + status (2 words). The most important case is
+     * ELE_GET_RANDOM: a fake success there hands the guest its own un-written
+     * buffer as cryptographic randomness.
+     */
+    if (!reproduced) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: ELE command 0x%02x not reproduced - failing closed "
+                      "(guest gets ELE_FAILURE, not a fabricated success)\n",
+                      __func__, command);
+        s->rr[0] = ((uint32_t)ELE_RSP_TAG << 24) | ((uint32_t)command << 16) |
+                   (2u << 8) | ver;
+        s->rr[1] = ELE_FAILURE_IND;
+        s->rsr = BIT(2) - 1;
+        imx93_ele_update_irq(s);
+        return;
+    }
+
+    words = imx93_ele_rsp_words(command);
 
     /*
      * Header: rsp_tag, size, command, ver. Word 1 carries the success status;
@@ -243,6 +367,11 @@ static const VMStateDescription vmstate_imx93_ele = {
     },
 };
 
+static const Property imx93_ele_properties[] = {
+    DEFINE_PROP_BOOL("fake-uncomputed-success", IMX93EleState,
+                     fake_uncomputed_success, false),
+};
+
 static void imx93_ele_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
@@ -251,6 +380,7 @@ static void imx93_ele_class_init(ObjectClass *oc, const void *data)
     dc->desc = "i.MX 93 ELE (EdgeLock Enclave) MU responder";
     rc->phases.hold = imx93_ele_reset_hold;
     dc->vmsd = &vmstate_imx93_ele;
+    device_class_set_props(dc, imx93_ele_properties);
 }
 
 static const TypeInfo imx93_ele_types[] = {

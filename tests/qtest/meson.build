@@ -260,7 +260,7 @@ qtests_aarch64 = \
   (config_all_accel.has_key('CONFIG_TCG') and config_all_devices.has_key('CONFIG_TPM_TIS_SYSBUS') ?            \
     ['tpm-tis-device-test', 'tpm-tis-device-swtpm-test'] : []) +                                         \
   (config_all_devices.has_key('CONFIG_FLEXCAN') ? ['flexcan-test'] : []) + \
-  (config_all_devices.has_key('CONFIG_FSL_IMX93') ? ['imx93-flexspi-test', 'imx93-pxp-test', 'imx93-isi-test', 'imx93-sai-test', 'imx93-lpi2c-test', 'imx93-flexio-test', 'imx93-lpspi-test'] : []) + \
+  (config_all_devices.has_key('CONFIG_FSL_IMX93') ? ['imx93-flexspi-test', 'imx93-pxp-test', 'imx93-isi-test', 'imx93-sai-test', 'imx93-lpi2c-test', 'imx93-flexio-test', 'imx93-lpspi-test', 'imx93-ele-test'] : []) + \
   (config_all_devices.has_key('CONFIG_ETHOS_U') ? ['ethos-u-test'] : []) + \
   (config_all_devices.has_key('CONFIG_XLNX_ZYNQMP_ARM') ? ['xlnx-can-test', 'fuzz-xlnx-dp-test'] : []) + \
   (config_all_devices.has_key('CONFIG_XLNX_VERSAL') ? ['xlnx-canfd-test', 'xlnx-versal-trng-test'] : []) + \
