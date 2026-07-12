@@ -37,6 +37,7 @@
 #define FLEXCAN_CTRL2      0x34
 #define FLEXCAN_MB_BASE    0x80
 #define FLEXCAN_MB_BANK1   0x280
+#define FLEXCAN_RXIMR0     0x880   /* per-MB individual acceptance masks */
 
 /* MCR bits */
 #define MCR_MDIS      (1u << 31)
@@ -54,6 +55,7 @@
 #define MB_CODE_RX_INACTIVE (0x0u << 24)
 #define MB_CODE_RX_EMPTY    (0x4u << 24)
 #define MB_CODE_RX_FULL     (0x2u << 24)
+#define MB_CODE_RX_OVERRUN  (0x6u << 24)
 #define MB_CODE_RX_BUSY     (0x1u << 24)
 #define MB_CODE_TX_INACTIVE (0x8u << 24)
 #define MB_CODE_TX_DATA     (0xcu << 24)
@@ -97,6 +99,18 @@ static uint8_t flexcan_len2dlc(uint8_t len, bool fd)
 static bool flexcan_fd_enabled(FlexCanState *s)
 {
     return s->regs[FLEXCAN_MCR / 4] & MCR_FDEN;
+}
+
+/*
+ * The module is on the bus only when it is not disabled (MCR[MDIS]) and not
+ * frozen (MCR[FRZ_ACK], asserted while halted for configuration). A disabled
+ * or frozen controller neither transmits nor receives on real silicon.
+ */
+static bool flexcan_bus_active(FlexCanState *s)
+{
+    uint32_t mcr = s->regs[FLEXCAN_MCR / 4];
+
+    return !(mcr & (MCR_MDIS | MCR_FRZ_ACK));
 }
 
 static unsigned flexcan_mb_size(FlexCanState *s)
@@ -199,7 +213,8 @@ static void flexcan_do_tx(FlexCanState *s)
         f.data[i] = (mb[2 + i / 4] >> (24 - 8 * (i % 4))) & 0xff;
     }
 
-    if (s->canbus) {
+    /* A disabled/frozen controller does not drive the bus. */
+    if (s->canbus && flexcan_bus_active(s)) {
         can_bus_client_send(&s->bus_client, &f, 1);
     }
 
@@ -209,7 +224,54 @@ static void flexcan_do_tx(FlexCanState *s)
 
 static bool flexcan_can_receive(CanBusClientState *client)
 {
-    return true;
+    FlexCanState *s = container_of(client, FlexCanState, bus_client);
+
+    /* A disabled or frozen controller is not listening on the bus. */
+    return flexcan_bus_active(s);
+}
+
+/*
+ * Does RX mailbox @idx accept this frame? An RX mailbox participates only in
+ * its EMPTY/FULL/OVERRUN states; the frame's IDE (standard vs extended) must
+ * match the mailbox's; and the ID must match under the mailbox's individual
+ * acceptance mask RXIMR (a 0 mask - the reset default - is "accept any ID",
+ * which is what Linux's rx-offload programs and then filters in software).
+ * Comparing in the mailbox ID-register layout lets the mask apply directly.
+ */
+static bool flexcan_mb_matches(FlexCanState *s, unsigned idx,
+                               const qemu_can_frame *f, bool eff)
+{
+    uint32_t *mb = &s->regs[flexcan_mb_off(s, idx) / 4];
+    uint32_t code = mb[0] & MB_CODE_MASK;
+    uint32_t mask = s->regs[(FLEXCAN_RXIMR0 + idx * 4) / 4];
+    uint32_t fid, mid;
+
+    if (code != MB_CODE_RX_EMPTY && code != MB_CODE_RX_FULL &&
+        code != MB_CODE_RX_OVERRUN) {
+        return false;
+    }
+    /*
+     * A zero mask is "accept any ID" and, as on silicon, any IDE too - this is
+     * the rx-offload default, so leave it wide open. Only once the guest has
+     * programmed a real filter do we also require the IDE (standard/extended)
+     * to match the mailbox.
+     */
+    if (mask == 0) {
+        return true;
+    }
+    if (!!(mb[0] & MB_IDE) != eff) {
+        return false;
+    }
+    if (eff) {
+        fid = f->can_id & QEMU_CAN_EFF_MASK;
+        mid = mb[1] & QEMU_CAN_EFF_MASK;
+        mask &= QEMU_CAN_EFF_MASK;
+    } else {
+        fid = (f->can_id & QEMU_CAN_SFF_MASK) << 18;
+        mid = mb[1] & (QEMU_CAN_SFF_MASK << 18);
+        mask &= (QEMU_CAN_SFF_MASK << 18);
+    }
+    return ((fid ^ mid) & mask) == 0;
 }
 
 static ssize_t flexcan_receive(CanBusClientState *client,
@@ -218,12 +280,19 @@ static ssize_t flexcan_receive(CanBusClientState *client,
     FlexCanState *s = container_of(client, FlexCanState, bus_client);
     const qemu_can_frame *f = frames;
     unsigned mb_last = flexcan_mb_count(s) - 2;
-    bool eff, rtr, fd;
-    unsigned idx;
+    unsigned idx, words, w;
+    int target = -1, first_match = -1;
+    bool eff, rtr, fd, overrun;
+    uint32_t *mb, cs;
     uint8_t len, dlc, i;
 
     if (!frames_cnt) {
         return 0;
+    }
+    /* A disabled/frozen controller does not receive (defensive: the bus should
+     * already have filtered us out via can_receive, but never store while off). */
+    if (!flexcan_bus_active(s)) {
+        return 1;
     }
     /* Drop error frames; this model has no error-state path. */
     if (f->can_id & QEMU_CAN_ERR_FLAG) {
@@ -237,50 +306,66 @@ static ssize_t flexcan_receive(CanBusClientState *client,
     dlc = flexcan_len2dlc(len, fd);
 
     /*
-     * Mailbox mode: deliver into the first EMPTY RX mailbox (RXIMR=0 => any
-     * ID matches; the guest's CAN stack filters in software).
+     * Acceptance filtering: scan RX mailboxes for one whose ID (under RXIMR)
+     * and IDE match. Deliver into the lowest-numbered MATCHING mailbox that is
+     * EMPTY (so successive frames fill successive mailboxes, as rx-offload
+     * expects). If every matching mailbox is already full, the lowest-numbered
+     * one OVERRUNs - the frame overwrites it and CODE becomes OVERRUN, so the
+     * data still moves AND the guest is told (never a silent drop). If NO
+     * mailbox is configured to accept this ID, the frame is not ours.
      */
     for (idx = 1; idx <= mb_last; idx++) {
-        uint32_t *mb = &s->regs[flexcan_mb_off(s, idx) / 4];
-        uint32_t cs;
-        unsigned words = fd ? 16 : 2, w;
-
-        if ((mb[0] & MB_CODE_MASK) != MB_CODE_RX_EMPTY) {
+        if (!flexcan_mb_matches(s, idx, f, eff)) {
             continue;
         }
+        if (first_match < 0) {
+            first_match = idx;
+        }
+        if ((s->regs[flexcan_mb_off(s, idx) / 4] & MB_CODE_MASK) ==
+            MB_CODE_RX_EMPTY) {
+            target = idx;
+            break;
+        }
+    }
+    if (target < 0) {
+        if (first_match < 0) {
+            return 1;   /* no mailbox filters for this ID: not for us */
+        }
+        target = first_match;   /* all matching mailboxes full -> overrun */
+    }
+    idx = target;
+    mb = &s->regs[flexcan_mb_off(s, idx) / 4];
+    overrun = (mb[0] & MB_CODE_MASK) != MB_CODE_RX_EMPTY;
+    words = fd ? 16 : 2;
 
-        cs = MB_CODE_RX_FULL | (dlc << 16);
-        if (eff) {
-            cs |= MB_IDE | MB_SRR;
+    cs = (overrun ? MB_CODE_RX_OVERRUN : MB_CODE_RX_FULL) | (dlc << 16);
+    if (eff) {
+        cs |= MB_IDE | MB_SRR;
+    }
+    if (rtr) {
+        cs |= MB_RTR;
+    }
+    if (fd) {
+        cs |= MB_EDL;
+        if (f->flags & QEMU_CAN_FRMF_BRS) {
+            cs |= MB_BRS;
         }
-        if (rtr) {
-            cs |= MB_RTR;
+        if (f->flags & QEMU_CAN_FRMF_ESI) {
+            cs |= MB_ESI;
         }
-        if (fd) {
-            cs |= MB_EDL;
-            if (f->flags & QEMU_CAN_FRMF_BRS) {
-                cs |= MB_BRS;
-            }
-            if (f->flags & QEMU_CAN_FRMF_ESI) {
-                cs |= MB_ESI;
-            }
-        }
-
-        mb[1] = eff ? (f->can_id & QEMU_CAN_EFF_MASK)
-                    : ((f->can_id & QEMU_CAN_SFF_MASK) << 18);
-        for (w = 0; w < words; w++) {
-            mb[2 + w] = 0;
-        }
-        for (i = 0; i < len && i < sizeof(f->data); i++) {
-            mb[2 + i / 4] |= (uint32_t)f->data[i] << (24 - 8 * (i % 4));
-        }
-        mb[0] = cs;   /* write CODE last */
-
-        flexcan_set_iflag(s, idx);
-        return 1;
     }
 
-    /* No free mailbox: drop (a real device would flag overrun). */
+    mb[1] = eff ? (f->can_id & QEMU_CAN_EFF_MASK)
+                : ((f->can_id & QEMU_CAN_SFF_MASK) << 18);
+    for (w = 0; w < words; w++) {
+        mb[2 + w] = 0;
+    }
+    for (i = 0; i < len && i < sizeof(f->data); i++) {
+        mb[2 + i / 4] |= (uint32_t)f->data[i] << (24 - 8 * (i % 4));
+    }
+    mb[0] = cs;   /* write CODE last */
+
+    flexcan_set_iflag(s, idx);
     return 1;
 }
 
