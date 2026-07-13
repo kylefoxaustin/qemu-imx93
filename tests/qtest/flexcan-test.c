@@ -74,6 +74,14 @@ static void test_tx_rx(void)
                                  "-machine canbus0=cb,canbus1=cb");
     uint32_t cs, id, d0;
 
+    /*
+     * Enable both controllers: MCR=0 clears MDIS and exits freeze. A
+     * disabled/frozen FlexCAN neither transmits nor receives (as on silicon),
+     * so the bus is idle until firmware brings the module out of reset.
+     */
+    qtest_writel(qts, FC1 + MCR, 0);
+    qtest_writel(qts, FC2 + MCR, 0);
+
     /* Receiver: arm RX mailbox 1 as EMPTY. */
     qtest_writel(qts, FC2 + MB_CS(1), CODE_RX_EMPTY);
 
@@ -126,6 +134,10 @@ static void test_tx_rx_volume(void)
     if (env) {
         qemu_strtoul(env, NULL, 10, &n);
     }
+
+    /* Enable both controllers (clear MDIS + exit freeze) before any traffic. */
+    qtest_writel(qts, FC1 + MCR, 0);
+    qtest_writel(qts, FC2 + MCR, 0);
 
     /* Arm RX mailbox 1 as EMPTY once; we re-arm it via W1C after each frame. */
     qtest_writel(qts, FC2 + MB_CS(1), CODE_RX_EMPTY);
