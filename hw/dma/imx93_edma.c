@@ -71,6 +71,17 @@
 #define CH_SBR_WR       (1u << 21)      /* tx: memory -> device */
 #define CH_SBR_RD       (1u << 22)      /* rx: device -> memory */
 
+/*
+ * CHn_SBR reset value per the i.MX 93 RM (both eDMA instances): 0x0000_8007 =
+ * PAL (bit 15, privileged bus protection) + MID (bits [2:0] = 7, the default
+ * initiator ID). fsl-edma read-modify-writes CH_SBR to set the RD/WR direction
+ * bit, so a zero reset would launder the wrong protection level and initiator
+ * ID into the guest's own transfer config; nothing in this model reads those
+ * bits, but silicon does. RD/WR (bits 21/22) are clear at reset, so the
+ * direction logic is unaffected.
+ */
+#define CH_SBR_RESET    0x00008007u
+
 #define TCD_CSR_START   (1u << 0)
 #define TCD_CSR_INTMAJ  (1u << 1)
 #define TCD_CSR_INTHALF (1u << 2)
@@ -480,6 +491,7 @@ static void imx93_edma_reset_hold(Object *obj, ResetType type)
     memset(s->mgmt, 0, sizeof(s->mgmt));
     for (int i = 0; i < IMX93_EDMA_MAX_CHANNELS; i++) {
         memset(s->chan[i].regs, 0, sizeof(s->chan[i].regs));
+        st32(s->chan[i].regs + CH_SBR, CH_SBR_RESET);   /* RM: PAL + MID=7 */
         s->chan[i].armed = false;
         s->chan[i].cyclic = false;
         if (i < s->num_channels) {

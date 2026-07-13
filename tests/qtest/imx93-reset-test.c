@@ -16,9 +16,13 @@
 #include "qemu/osdep.h"
 #include "libqtest-single.h"
 
-/* i.MX 93 ADC1 and WDOG1 register bases. */
+/* i.MX 93 ADC1, WDOG1 and eDMA1 register bases. */
 #define ADC1    0x44530000
 #define WDOG1   0x442d0000
+#define EDMA1   0x44000000
+
+/* eDMA: channel N's page is at base + (N+1)*0x10000; CH_SBR at page offset 0xc. */
+#define EDMA_CH0_SBR (EDMA1 + 0x10000 + 0x0c)
 
 /* SAR_ADC registers. */
 #define ADC_MCR    0x00
@@ -75,10 +79,26 @@ static void test_wdog_reset(void)
     qtest_quit(qts);
 }
 
+static void test_edma_reset(void)
+{
+    QTestState *qts = qtest_init("-machine imx93-11x11-evk -accel qtest");
+
+    /*
+     * RM CHn_SBR reset = 0x0000_8007 (PAL privileged + MID=7). fsl-edma
+     * read-modify-writes this register to set the transfer direction, so a
+     * zero reset would launder the wrong protection level / initiator ID into
+     * the guest's config. The direction bits (RD/WR, 21/22) are clear here.
+     */
+    g_assert_cmphex(qtest_readl(qts, EDMA_CH0_SBR), ==, 0x00008007);
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
     qtest_add_func("/imx93/reset/adc", test_adc_reset);
     qtest_add_func("/imx93/reset/wdog", test_wdog_reset);
+    qtest_add_func("/imx93/reset/edma", test_edma_reset);
     return g_test_run();
 }
