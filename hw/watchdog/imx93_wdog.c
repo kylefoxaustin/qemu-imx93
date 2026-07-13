@@ -33,6 +33,7 @@
 #define CS_ULK      (1u << 11)
 #define CS_PRES     (1u << 12)
 #define CS_CMD32EN  (1u << 13)
+#define CS_CLK_LPO  (1u << 8)   /* CLK[9:8]=01: LPO clock source (RM reset default) */
 
 #define UNLOCK      0xd928c520u
 #define REFRESH     0xb480a602u
@@ -143,14 +144,19 @@ static void wdog_reset_hold(Object *obj, ResetType type)
     IMX93WdogState *s = IMX93_WDOG(obj);
 
     /*
-     * Default disabled (no bootloader ran to enable it under QEMU), but with
-     * CMD32EN set so the driver uses the single 32-bit UNLOCK/REFRESH sequence
-     * rather than two 16-bit half-word writes.
+     * RM reset: CS = 0x0000_2900, TOVAL = 0x0000_0400.
+     * EN (bit 7) is clear - the watchdog is disabled out of reset (no
+     * bootloader runs under QEMU to enable it). CMD32EN selects the single
+     * 32-bit UNLOCK/REFRESH sequence over two 16-bit half-word writes, and
+     * CLK[9:8]=01 is the LPO clock default. ULK (bit 11) reads set out of
+     * reset - silicon leaves a brief unlock window after reset - which our
+     * read path derives from s->unlocked, so we open that window here; the
+     * driver re-issues the UNLOCK key before every reconfigure regardless.
      */
-    s->cs = CS_CMD32EN;
-    s->toval = 0;
+    s->cs = CS_CMD32EN | CS_CLK_LPO;
+    s->toval = 0x400;
     s->win = 0;
-    s->unlocked = false;
+    s->unlocked = true;
     s->rcs = false;
     timer_del(&s->timer);
 }

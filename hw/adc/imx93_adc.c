@@ -32,6 +32,17 @@
 #define MCR_CALSTART    (1u << 14)
 #define MCR_PWDN        (1u << 0)
 
+/*
+ * MCR reset value per the i.MX 93 RM (SAR_ADC memory map): 0x0000_3901.
+ * PWDN (bit 0) is set - the ADC comes up powered down - alongside the
+ * default NRSMPL/TSAMP sampling-config and ADCLKSE bits. Only ADCLKSE
+ * (bit 8) is consumed by the Linux driver, which sets it explicitly
+ * during clock config regardless of reset, so the extra bits are inert
+ * here; we still reset to the silicon value so a guest read-modify-write
+ * of MCR does not launder a fabricated default back into its own config.
+ */
+#define MCR_RESET       0x00003901u
+
 /* MSR.ADCSTATUS[2:0] codes the driver polls for. */
 #define MSR_STATUS_IDLE         0
 #define MSR_STATUS_POWER_DOWN   1
@@ -131,7 +142,7 @@ static void adc_reset_hold(Object *obj, ResetType type)
 {
     IMX93AdcState *s = IMX93_ADC(obj);
 
-    s->mcr = MCR_PWDN;      /* powered down until the driver enables it */
+    s->mcr = MCR_RESET;     /* RM reset: PWDN set (powered down) + sampling defaults */
     s->isr = 0;
     s->imr = 0;
     s->ncmr0 = 0;
