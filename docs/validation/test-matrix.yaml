@@ -72,7 +72,8 @@ groups:
         notes: "Concurrent M33 boot can wedge the desktop guest — NXP BSP defects, not the model"
       - block: "eDMA1 / eDMA2"
         tier: A
-        evidence: "Drives SAI audio (cyclic, drain-paced); live"
+        evidence: "Drives SAI audio (cyclic, drain-paced); live. CHn_SBR reset value matches the RM (0x8007: PAL + MID=7) so the fsl-edma read-modify-write does not launder the wrong bus attributes"
+        tests: [imx93-reset-test]
       - block: "CCM / ANATOP / SRC / power"
         tier: B
         evidence: "Linux programs clocks/PLLs/resets directly (no System Manager)"

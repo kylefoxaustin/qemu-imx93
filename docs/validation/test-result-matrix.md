@@ -36,7 +36,7 @@ _Status column source: real meson testlog._
 |-------|------|--------|----------|-------|
 | Dual Cortex-A55 SMP | A | — | Boots stock BSP Linux to userspace, SMP | Not cycle-accurate |
 | Cortex-M33 + RPMsg (MU) | A | — | Real NXP firmware boots; A55<->M33 RPMsg live | Concurrent M33 boot can wedge the desktop guest — NXP BSP defects, not the model |
-| eDMA1 / eDMA2 | A | — | Drives SAI audio (cyclic, drain-paced); live |  |
+| eDMA1 / eDMA2 | A | PASS (1) | Drives SAI audio (cyclic, drain-paced); live. CHn_SBR reset value matches the RM (0x8007: PAL + MID=7) so the fsl-edma read-modify-write does not launder the wrong bus attributes |  |
 | CCM / ANATOP / SRC / power | B | — | Linux programs clocks/PLLs/resets directly (no System Manager) | The defining i.MX93-vs-95 difference — modelled, not SCMI-stubbed |
 | OCOTP / ELE / BBNSM / SEMA42 | B | PASS (1) | Driver probe + mailbox / register transactions; ELE returns real host entropy for GET_RANDOM and honest-faults other crypto to the guest (qtest) | EdgeLock Enclave mailbox functional; uncomputed crypto fails closed to the guest by default |
 | SYSCTR / TSTMR / TPM / WDOG / TMU | B | PASS (1) | Timers/thermal/watchdog driver bring-up; WDOG CS/TOVAL reset values match the RM (0x2900/0x400) and coexist with the UNLOCK/enable/re-lock handshake |  |
