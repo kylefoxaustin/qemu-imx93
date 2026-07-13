@@ -33,7 +33,7 @@ harnesses:
   - harness: "qtest (device)"
     location: "tests/qtest/ethos-u-test, imx93-*-test"
     scope: "MMIO-level device behaviour, golden compares"
-    tests: [ethos-u-test, imx93-pxp-test, imx93-isi-test, imx93-sai-test, imx93-lpi2c-test, imx93-lpspi-test, imx93-flexio-test, imx93-flexspi-test]
+    tests: [ethos-u-test, imx93-pxp-test, imx93-isi-test, imx93-sai-test, imx93-lpi2c-test, imx93-lpspi-test, imx93-flexio-test, imx93-flexspi-test, imx93-ele-test, flexcan-test, imx93-flexcan-test]
   - harness: "Functional (boot)"
     location: "upstream/test_imx93_evk.py (staged for upstream)"
     scope: "Boot stock BSP Linux to userspace"
@@ -79,8 +79,9 @@ groups:
         notes: "The defining i.MX93-vs-95 difference — modelled, not SCMI-stubbed"
       - block: "OCOTP / ELE / BBNSM / SEMA42"
         tier: B
-        evidence: "Driver probe + mailbox / register transactions"
-        notes: "EdgeLock Enclave mailbox functional"
+        evidence: "Driver probe + mailbox / register transactions; ELE returns real host entropy for GET_RANDOM and honest-faults other crypto to the guest (qtest)"
+        notes: "EdgeLock Enclave mailbox functional; uncomputed crypto fails closed to the guest by default"
+        tests: [imx93-ele-test]
       - block: "SYSCTR / TSTMR / TPM / WDOG / TMU"
         tier: B
         evidence: "Timers/thermal/watchdog driver bring-up"
@@ -160,8 +161,9 @@ groups:
         tests: [imx93-flexspi-test]
       - block: "FlexCAN / CAN bus"
         tier: A
-        evidence: "Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93"
+        evidence: "Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93; qtest: RXIMR ID-match + overrun + disabled-controller gating (real CAN1->CAN2, mutation-verified)"
         notes: "can-host-chardev bridges a can-bus to a chardev — no host vcan/SocketCAN needed"
+        tests: [flexcan-test, imx93-flexcan-test]
       - block: "GPIO / PMIC"
         tier: B
         evidence: "Poweroff, GPIO-idle-HIGH; PMIC over I2C"
@@ -226,7 +228,7 @@ readme_groups:
       evidence: "-device …,bus=lpi2cN enumerated + read byte-exact; drives board-to-board I2C (i2c-link)",
       blocks: ["LPI2C x8"] }
   - { label: "FlexCAN ×2", tier: A,
-      evidence: "can0 up; frame round-trip; board-to-board (can-host-chardev)",
+      evidence: "can0 up; RXIMR ID-matched RX + overrun + MDIS-gated; frame round-trip; board-to-board (can-host-chardev)",
       blocks: ["FlexCAN / CAN bus"] }
   - { label: "ChipIdea USB host (ci_hdrc)", tier: A,
       evidence: "usb-storage/usb-kbd enumerate; usbredir host — bulk-echo + CDC /dev/ttyACM0 byte-exact",
@@ -235,7 +237,7 @@ readme_groups:
       evidence: "Linux programs directly (no System Manager)",
       blocks: ["CCM / ANATOP / SRC / power"] }
   - { label: "Enclave + fuses + timers — ELE/OCOTP/BBNSM/SEMA42, SYSCTR/TPM/WDOG/TMU", tier: B,
-      evidence: "Drivers bind; registers/IRQ/timing correct (ELE carries an opt-in honest-fault rail)",
+      evidence: "Drivers bind; registers/IRQ/timing correct (ELE serves coordination/probe cmds, returns real host entropy for GET_RANDOM, and honest-faults every other crypto to the guest by default)",
       blocks: ["OCOTP / ELE / BBNSM / SEMA42", "SYSCTR / TSTMR / TPM / WDOG / TMU"] }
   - { label: "Media Block Control", tier: B,
       evidence: "MEDIAMIX block-ctrl GPR + SRC power slice for the display/camera path",

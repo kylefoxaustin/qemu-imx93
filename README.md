@@ -112,7 +112,7 @@ failure).
 | LPUART ×8 | A | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact |
 | LPSPI ×8 | A | Per-bus SSI master; is25lp064 JEDEC byte-exact; drives board-to-board SPI (spi-link) |
 | LPI2C ×8 (+ PMIC/expanders) | A | -device …,bus=lpi2cN enumerated + read byte-exact; drives board-to-board I2C (i2c-link) |
-| FlexCAN ×2 | A | can0 up; frame round-trip; board-to-board (can-host-chardev) |
+| FlexCAN ×2 | A | can0 up; RXIMR ID-matched RX + overrun + MDIS-gated; frame round-trip; board-to-board (can-host-chardev) |
 | ChipIdea USB host (ci_hdrc) | A | usb-storage/usb-kbd enumerate; usbredir host — bulk-echo + CDC /dev/ttyACM0 byte-exact |
 | Clocks / power — CCM / ANATOP / SRC | B | Linux programs directly (no System Manager) |
 | Enclave + fuses + timers — ELE/OCOTP/BBNSM/SEMA42, SYSCTR/TPM/WDOG/TMU | B | Drivers bind; registers/IRQ/timing correct (ELE serves coordination/probe cmds, returns real host entropy for GET_RANDOM, and honest-faults every other crypto to the guest by default) |
@@ -177,8 +177,10 @@ over eQOS.
 Correctness rests on **five independent gates**, not one:
 
 1. **Kernel-free qtests** on the `imx93-11x11-evk` machine (Ethos-U executor,
-   PXP, ISI, SAI, LPI2C, LPSPI, FlexIO, FlexSPI — async timer races pinned with
-   `clock_step`). CI-runnable; the matrix is assembled by
+   PXP, ISI, SAI, LPI2C, LPSPI, FlexIO, FlexSPI, ELE honest-fault, FlexCAN
+   RX-filtering — async timer races pinned with `clock_step` where present,
+   silent-wrongs caught by asserting the value not the verdict). CI-runnable;
+   the matrix is assembled by
    [`docs/validation/gen-matrix.py`](docs/validation/gen-matrix.py), which reads
    Tier from `test-matrix.yaml` and stamps the result from the run — it gates on
    any qtest regression.
