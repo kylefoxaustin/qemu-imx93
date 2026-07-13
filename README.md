@@ -195,7 +195,12 @@ Correctness rests on **five independent gates**, not one:
 
 The recurring lesson: a green deterministic qtest is *not* validation for a model
 with no live workload — the FlexIO IRQ-storm fix and the LPSPI PARAM/FCF fixes
-only surfaced against a real-driver repro. Fidelity judgments (the NPU honest-fault
+only surfaced against a real-driver repro. And a green qtest that *cannot fail* is
+worse than none: every device qtest here was **mutation-audited** — its model's
+load-bearing behavior deliberately broken (a corrupted DMA byte, a disabled FIFO
+drain, a skipped reset, a wrong device id) to confirm the test then goes red — so
+a passing run means the check can catch a regression, not that it is decoration.
+Fidelity judgments (the NPU honest-fault
 discipline, the PXP scale/CSC boundary) live in
 [`docs/validation/fidelity-audit.md`](docs/validation/fidelity-audit.md). The
 pre-submission pipeline that takes the machine series from working-branch to
