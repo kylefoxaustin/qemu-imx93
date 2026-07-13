@@ -33,7 +33,7 @@ harnesses:
   - harness: "qtest (device)"
     location: "tests/qtest/ethos-u-test, imx93-*-test"
     scope: "MMIO-level device behaviour, golden compares"
-    tests: [ethos-u-test, imx93-pxp-test, imx93-isi-test, imx93-sai-test, imx93-lpi2c-test, imx93-lpspi-test, imx93-flexio-test, imx93-flexspi-test, imx93-ele-test, flexcan-test, imx93-flexcan-test]
+    tests: [ethos-u-test, imx93-pxp-test, imx93-isi-test, imx93-sai-test, imx93-lpi2c-test, imx93-lpspi-test, imx93-flexio-test, imx93-flexspi-test, imx93-ele-test, flexcan-test, imx93-flexcan-test, imx93-reset-test]
   - harness: "Functional (boot)"
     location: "upstream/test_imx93_evk.py (staged for upstream)"
     scope: "Boot stock BSP Linux to userspace"
@@ -84,7 +84,8 @@ groups:
         tests: [imx93-ele-test]
       - block: "SYSCTR / TSTMR / TPM / WDOG / TMU"
         tier: B
-        evidence: "Timers/thermal/watchdog driver bring-up"
+        evidence: "Timers/thermal/watchdog driver bring-up; WDOG CS/TOVAL reset values match the RM (0x2900/0x400) and coexist with the UNLOCK/enable/re-lock handshake"
+        tests: [imx93-reset-test]
 
   - name: "Networking / storage"
     rows:
@@ -169,7 +170,8 @@ groups:
         evidence: "Poweroff, GPIO-idle-HIGH; PMIC over I2C"
       - block: "ADC"
         tier: B
-        evidence: "Driver bring-up"
+        evidence: "Driver bring-up; SAR-ADC MCR/MSR reset values match the RM (0x3901/0x1)"
+        tests: [imx93-reset-test]
       - block: "I3C1 (Silvaco)"
         tier: B
         evidence: "I3C master bridges to legacy-I2C; wm8962-on-I3C audio card probes over it"

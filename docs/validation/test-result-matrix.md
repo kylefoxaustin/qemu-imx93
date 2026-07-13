@@ -22,7 +22,7 @@ _Status column source: real meson testlog._
 | Harness | Location | Scope | Result |
 |---------|----------|-------|--------|
 | Unit (pure logic) | `tests/unit/test-ethos-u-{cmdstream,mlw,kernels,requant}` | NPU decoder / weight (mlw) / int8 kernels / requant, host-only | PASS (4) |
-| qtest (device) | `tests/qtest/ethos-u-test, imx93-*-test` | MMIO-level device behaviour, golden compares | PASS (11) |
+| qtest (device) | `tests/qtest/ethos-u-test, imx93-*-test` | MMIO-level device behaviour, golden compares | PASS (12) |
 | Functional (boot) | `upstream/test_imx93_evk.py (staged for upstream)` | Boot stock BSP Linux to userspace | PASS (attested) |
 | Media conformance | `tests/media-conformance/` | v4l2-compliance (ISI), modetest (LCDIF/KMS) | 36 PASS / 0 FAIL / 26 SKIP (attested) |
 | Torture / concurrency | `tests/torture/` | Live desktop while NPU/CPU/storage/net hammer | 0 oops / 0 wedge (attested) |
@@ -39,7 +39,7 @@ _Status column source: real meson testlog._
 | eDMA1 / eDMA2 | A | — | Drives SAI audio (cyclic, drain-paced); live |  |
 | CCM / ANATOP / SRC / power | B | — | Linux programs clocks/PLLs/resets directly (no System Manager) | The defining i.MX93-vs-95 difference — modelled, not SCMI-stubbed |
 | OCOTP / ELE / BBNSM / SEMA42 | B | PASS (1) | Driver probe + mailbox / register transactions; ELE returns real host entropy for GET_RANDOM and honest-faults other crypto to the guest (qtest) | EdgeLock Enclave mailbox functional; uncomputed crypto fails closed to the guest by default |
-| SYSCTR / TSTMR / TPM / WDOG / TMU | B | — | Timers/thermal/watchdog driver bring-up |  |
+| SYSCTR / TSTMR / TPM / WDOG / TMU | B | PASS (1) | Timers/thermal/watchdog driver bring-up; WDOG CS/TOVAL reset values match the RM (0x2900/0x400) and coexist with the UNLOCK/enable/re-lock handshake |  |
 
 ## Networking / storage
 
@@ -78,7 +78,7 @@ _Status column source: real meson testlog._
 | FlexSPI | B | PASS (1) | qtest (NOR bring-up) |  |
 | FlexCAN / CAN bus | A | PASS (2) | Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93; qtest: RXIMR ID-match + overrun + disabled-controller gating (real CAN1->CAN2, mutation-verified) | can-host-chardev bridges a can-bus to a chardev — no host vcan/SocketCAN needed |
 | GPIO / PMIC | B | — | Poweroff, GPIO-idle-HIGH; PMIC over I2C |  |
-| ADC | B | — | Driver bring-up |  |
+| ADC | B | PASS (1) | Driver bring-up; SAR-ADC MCR/MSR reset values match the RM (0x3901/0x1) |  |
 | I3C1 (Silvaco) | B | — | I3C master bridges to legacy-I2C; wm8962-on-I3C audio card probes over it |  |
 
 ## Not present on this SoC (N/A — documented)
