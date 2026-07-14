@@ -46,7 +46,8 @@ command -v "$CROSS" >/dev/null || skip "no cross compiler ($CROSS)"
 for ko in $CAN_KOS; do [ -e "$MODDIR/$ko" ] || skip "missing CAN module $ko"; done
 
 SOCK=${SOCK:-$(mktemp -u /tmp/imx93-canlink.XXXXXX.sock)}
-WORK=$(mktemp -d); trap 'rm -rf "$WORK" "$SOCK"; kill ${SPID:-} ${CPID:-} 2>/dev/null' EXIT
+. "$HERE/reap.sh"
+WORK=$(mktemp -d); trap 'reap_all; rm -rf "$WORK" "$SOCK"' EXIT INT TERM HUP
 SPID=; CPID=
 
 "$CROSS" -O2 -static -o "$WORK/canlink" "$HERE/canlink.c" || die "canlink build failed"
@@ -104,10 +105,10 @@ boot() {                    # $1=initrd  $2=chardev-args  $3=logfile
 
 RLOG="$WORK/recv.log"; SLOG="$WORK/send.log"
 echo "== booting i.MX 93 RECEIVER (can-host-chardev socket listen) =="
-boot "$RECV_IRD" "-chardev socket,id=canl,path=$SOCK,server=on,wait=off" "$RLOG"; SPID=$!
+boot "$RECV_IRD" "-chardev socket,id=canl,path=$SOCK,server=on,wait=off" "$RLOG"; SPID=$!; reap_track $SPID
 sleep 3
 echo "== booting i.MX 93 SENDER (can-host-chardev socket connect) =="
-boot "$SEND_IRD" "-chardev socket,id=canl,path=$SOCK,server=off,reconnect-ms=1000" "$SLOG"; CPID=$!
+boot "$SEND_IRD" "-chardev socket,id=canl,path=$SOCK,server=off,reconnect-ms=1000" "$SLOG"; CPID=$!; reap_track $CPID
 
 wait $SPID $CPID 2>/dev/null
 

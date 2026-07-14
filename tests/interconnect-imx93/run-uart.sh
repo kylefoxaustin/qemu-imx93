@@ -37,7 +37,8 @@ for f in "$QEMU" "$IMAGE" "$DTB" "$INITRD_SRC"; do [ -e "$f" ] || skip "missing 
 [ -x "$DTC" ] || skip "no dtc (need it to enable LPUART2); set DTC="
 
 SOCK=${SOCK:-$(mktemp -u /tmp/imx93-uartlink.XXXXXX.sock)}
-WORK=$(mktemp -d); trap 'rm -rf "$WORK" "$SOCK"; kill ${SPID:-} ${CPID:-} 2>/dev/null' EXIT
+. "$HERE/reap.sh"
+WORK=$(mktemp -d); trap 'reap_all; rm -rf "$WORK" "$SOCK"' EXIT INT TERM HUP
 SPID=; CPID=
 
 # Enable LPUART2 (serial@44390000) in the dtb: status "disabled" -> "okay".
@@ -102,7 +103,7 @@ RECV_IRD=$(build_initrd recv)
 SEND_IRD=$(build_initrd send)
 
 boot() {                    # $1=initrd  $2=chardev-args  $3=logfile
-    timeout "$TMO" "$QEMU" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
+    timeout -k 5 "$TMO" "$QEMU" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
         -kernel "$IMAGE" -dtb "$DTB2" -initrd "$1" \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/init" \
         $2 -serial file:"$3" -serial chardev:ul \
@@ -111,10 +112,10 @@ boot() {                    # $1=initrd  $2=chardev-args  $3=logfile
 
 RLOG="$WORK/recv.log"; SLOG="$WORK/send.log"
 echo "== booting i.MX 93 RECEIVER (LPUART2 socket listen) =="
-boot "$RECV_IRD" "-chardev socket,id=ul,path=$SOCK,server=on,wait=off" "$RLOG"; SPID=$!
+boot "$RECV_IRD" "-chardev socket,id=ul,path=$SOCK,server=on,wait=off" "$RLOG"; SPID=$!; reap_track $SPID
 sleep 2
 echo "== booting i.MX 93 SENDER (LPUART2 socket connect) =="
-boot "$SEND_IRD" "-chardev socket,id=ul,path=$SOCK,server=off" "$SLOG"; CPID=$!
+boot "$SEND_IRD" "-chardev socket,id=ul,path=$SOCK,server=off" "$SLOG"; CPID=$!; reap_track $CPID
 
 wait $SPID $CPID 2>/dev/null
 

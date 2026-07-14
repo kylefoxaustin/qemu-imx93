@@ -87,8 +87,9 @@ echo "peer artifact: $PROVENANCE"
 
 SOCK=$(mktemp -u /tmp/imx93-mcx-spi.XXXXXX.sock)
 WORK=$(mktemp -d)
+. "$HERE/reap.sh"
 MPID=
-trap 'kill $MPID 2>/dev/null; rm -rf "$WORK" "$SOCK"' EXIT
+trap 'reap_all; rm -rf "$WORK" "$SOCK"' EXIT INT TERM HUP
 
 # Build the 93 spidev peer + the MCX M33 firmware.
 "$CROSS" -O2 -static -o "$WORK/spi_peer" "$HERE/spi_peer.c" || die "spi_peer build failed"
@@ -139,15 +140,20 @@ chmod +x "$S/init"
 MCXCON="$WORK/mcx-console.log"; CLOG="$WORK/93-client.log"
 
 echo "== launching MCXN947 SPI node (bare-metal M33, spi-link socket listen) =="
-"$QEMUMCX" -M frdm-mcxn947 -display none -monitor none -serial "file:$MCXCON" \
+# The peer is wrapped in a timeout as well as tracked by the reaper: a bound
+# that lives INSIDE the peer survives the death of this script (a SIGKILL, a
+# closed terminal), where the trap does not. Bare-metal firmware busy-polls,
+# so an unreaped peer is a core burning until someone notices - and nobody
+# notices a process that is only stealing other people's numbers.
+timeout -k 5 "$TMO" "$QEMUMCX" -M frdm-mcxn947 -display none -monitor none -serial "file:$MCXCON" \
     -chardev "socket,id=spil,path=$SOCK,server=on,wait=off" \
     -device spi-link,bus=mcxn-lpspi,chardev=spil \
     -kernel "$WORK/spilink.elf" -no-reboot >/dev/null 2>&1 &
-MPID=$!
+MPID=$!; reap_track $MPID
 i=0; while [ $i -lt 30 ]; do ss -xl 2>/dev/null | grep -qF "$SOCK" && break; sleep 0.5; i=$((i + 1)); done
 
 echo "== booting i.MX 93 client (Linux fsl-lpspi /dev/spidev, spi-link socket connect) =="
-timeout "$TMO" "$QEMU93" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
+timeout -k 5 "$TMO" "$QEMU93" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
     -kernel "$IMAGE" -dtb "$WORK/spi.dtb" -initrd "$WORK/peer.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/init" \
     -chardev "socket,id=spil,path=$SOCK,server=off,reconnect-ms=1000" \

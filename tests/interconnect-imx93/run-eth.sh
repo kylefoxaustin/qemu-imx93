@@ -34,7 +34,8 @@ for f in "$QEMU" "$IMAGE" "$DTB" "$INITRD_SRC"; do [ -e "$f" ] || skip "missing 
 command -v "$CROSS" >/dev/null || skip "no cross compiler ($CROSS)"
 
 SPID=; CPID=
-WORK=$(mktemp -d); trap 'rm -rf "$WORK"; kill ${SPID:-} ${CPID:-} 2>/dev/null' EXIT
+. "$HERE/reap.sh"
+WORK=$(mktemp -d); trap 'reap_all; rm -rf "$WORK"' EXIT INT TERM HUP
 
 "$CROSS" -O2 -static -o "$WORK/linktool" "$HERE/linktool.c" || die "linktool build failed"
 
@@ -73,7 +74,7 @@ SRV_IRD=$(build_initrd server "$SUBNET.1" "$SUBNET.2")
 CLI_IRD=$(build_initrd client "$SUBNET.2" "$SUBNET.1")
 
 boot() {                    # $1=initrd  $2=nic-arg  $3=logfile
-    timeout "$TMO" "$QEMU" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
+    timeout -k 5 "$TMO" "$QEMU" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
         -kernel "$IMAGE" -dtb "$DTB" -initrd "$1" \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/init" \
         -nic "$2" -nic user \
@@ -82,10 +83,10 @@ boot() {                    # $1=initrd  $2=nic-arg  $3=logfile
 
 SLOG="$WORK/server.log"; CLOG="$WORK/client.log"
 echo "== booting i.MX 93 SERVER (socket listen :$PORT) =="
-boot "$SRV_IRD" "socket,listen=127.0.0.1:$PORT" "$SLOG"; SPID=$!
+boot "$SRV_IRD" "socket,listen=127.0.0.1:$PORT" "$SLOG"; SPID=$!; reap_track $SPID
 sleep 2   # let the listener bind before the connector dials
 echo "== booting i.MX 93 CLIENT (socket connect :$PORT) =="
-boot "$CLI_IRD" "socket,connect=127.0.0.1:$PORT" "$CLOG"; CPID=$!
+boot "$CLI_IRD" "socket,connect=127.0.0.1:$PORT" "$CLOG"; CPID=$!; reap_track $CPID
 
 wait $SPID $CPID 2>/dev/null
 

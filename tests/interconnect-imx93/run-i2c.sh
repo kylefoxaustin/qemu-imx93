@@ -36,7 +36,8 @@ for f in "$QEMU" "$IMAGE" "$DTB" "$INITRD_SRC"; do [ -e "$f" ] || skip "missing 
 command -v "$CROSS" >/dev/null || skip "no cross compiler ($CROSS)"
 
 SOCK=${SOCK:-$(mktemp -u /tmp/imx93-i2clink.XXXXXX.sock)}
-WORK=$(mktemp -d); trap 'rm -rf "$WORK" "$SOCK"; kill ${SPID:-} ${CPID:-} 2>/dev/null' EXIT
+. "$HERE/reap.sh"
+WORK=$(mktemp -d); trap 'reap_all; rm -rf "$WORK" "$SOCK"' EXIT INT TERM HUP
 SPID=; CPID=
 
 "$CROSS" -O2 -static -o "$WORK/i2clink" "$HERE/i2clink.c" || die "i2clink build failed"
@@ -87,7 +88,7 @@ RECV_IRD=$(build_initrd recv)
 SEND_IRD=$(build_initrd send)
 
 boot() {                    # $1=initrd  $2=chardev-args  $3=logfile
-    timeout "$TMO" "$QEMU" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
+    timeout -k 5 "$TMO" "$QEMU" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
         -kernel "$IMAGE" -dtb "$DTB" -initrd "$1" \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/init" \
         $2 -device i2c-link,bus=lpi2c3,address="$ADDR",chardev=i2cl \
@@ -96,10 +97,10 @@ boot() {                    # $1=initrd  $2=chardev-args  $3=logfile
 
 RLOG="$WORK/recv.log"; SLOG="$WORK/send.log"
 echo "== booting i.MX 93 RECEIVER (i2c-link socket listen) =="
-boot "$RECV_IRD" "-chardev socket,id=i2cl,path=$SOCK,server=on,wait=off" "$RLOG"; SPID=$!
+boot "$RECV_IRD" "-chardev socket,id=i2cl,path=$SOCK,server=on,wait=off" "$RLOG"; SPID=$!; reap_track $SPID
 sleep 2
 echo "== booting i.MX 93 SENDER (i2c-link socket connect) =="
-boot "$SEND_IRD" "-chardev socket,id=i2cl,path=$SOCK,server=off,reconnect-ms=1000" "$SLOG"; CPID=$!
+boot "$SEND_IRD" "-chardev socket,id=i2cl,path=$SOCK,server=off,reconnect-ms=1000" "$SLOG"; CPID=$!; reap_track $CPID
 
 wait $SPID $CPID 2>/dev/null
 
