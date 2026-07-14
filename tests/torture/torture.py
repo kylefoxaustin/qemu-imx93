@@ -19,6 +19,7 @@
 #
 # Env: QEMU, KERNEL, DTB, WIC, OVERLAY (9p dir, must hold launcher.sh), OUTDIR
 #      (screendumps), DURATION (soak seconds, default 600).
+import ctypes
 import os, socket, subprocess, sys, time, signal
 from PIL import Image, ImageChops
 
@@ -27,6 +28,21 @@ HOME = os.path.expanduser("~")
 DEPLOY = E("DEPLOY", HOME + "/Documents/nxp/linux/imx-yocto-bsp/build-imx93/"
            "tmp/deploy/images/imx93evk")
 QEMU = E("QEMU", os.getcwd() + "/build-imx93/qemu-system-aarch64")
+
+PR_SET_PDEATHSIG = 1
+
+
+def die_with_parent():
+    """Ask the kernel to SIGKILL this guest if this harness ever dies.
+
+    The finally block below already killpg's the guest, but a finally block dies
+    with its interpreter: SIGKILL this script, or drop the terminal, and the
+    guest is orphaned with nothing left that can stop it. A bound that lives in
+    the PARENT is not a bound. This one lives in the kernel, so it cannot be
+    skipped and it survives a SIGKILL to us.
+    """
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+
 KERNEL = E("KERNEL", DEPLOY + "/Image")
 DTB = E("DTB", DEPLOY + "/imx93-11x11-evk.dtb")
 WIC = E("WIC", HOME + "/Documents/nxp/imx93-weston.wic")
@@ -65,7 +81,8 @@ qemu = subprocess.Popen([
     "-device", "virtio-9p-device,fsdev=fs0,mount_tag=overlay",
     "-serial", f"unix:{SER},server,nowait", "-serial", "null",
     "-monitor", f"unix:{MON},server,nowait",
-], stdout=subprocess.DEVNULL, stderr=open(TD + "/qemu.err", "w"), start_new_session=True)
+], stdout=subprocess.DEVNULL, stderr=open(TD + "/qemu.err", "w"), start_new_session=True,
+   preexec_fn=die_with_parent)
 print(f"qemu pid {qemu.pid}", flush=True)
 
 def conn(path, tries=80):

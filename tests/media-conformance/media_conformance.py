@@ -11,7 +11,7 @@
 #
 # Env: QEMU KERNEL DTB BASE_INITRD OVERLAY_DIR (files cpio'd in, incl battery.sh
 #      + tool binaries) LANE (display|camera) OUTDIR DURATION.
-import os, socket, subprocess, sys, time, signal, json, select
+import ctypes, os, socket, subprocess, sys, time, signal, json, select
 
 E = os.environ.get
 QEMU = E("QEMU"); KERNEL = E("KERNEL"); DTB = E("DTB")
@@ -50,6 +50,20 @@ with open(f"{TD}/c.cpio.gz", "wb") as cc:
     for src in (BASE, f"{TD}/o.cpio"):
         cc.write(open(src, "rb").read())
 
+PR_SET_PDEATHSIG = 1
+
+
+def die_with_parent():
+    """Ask the kernel to SIGKILL this guest if this harness ever dies.
+
+    The finally block below already killpg's the guest, but a finally block dies
+    with its interpreter: SIGKILL this script, or drop the terminal, and the
+    guest is orphaned with nothing left that can stop it. A bound that lives in
+    the PARENT is not a bound. This one lives in the kernel, so it cannot be
+    skipped and it survives a SIGKILL to us.
+    """
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+
 MON = f"{TD}/qmp.sock"
 qemu = subprocess.Popen([
     QEMU, "-M", "imx93-11x11-evk", "-m", "4G", "-display", "none", "-audio", "driver=none",
@@ -58,7 +72,7 @@ qemu = subprocess.Popen([
     "-serial", f"file:{CON}", "-serial", "null",
     "-qmp", f"unix:{MON},server,nowait",
 ], stdout=subprocess.DEVNULL, stderr=open(f"{TD}/qemu.err", "w"),
-   start_new_session=True)
+   start_new_session=True, preexec_fn=die_with_parent)
 print(f"[{LANE}] qemu pid {qemu.pid}; console -> {CON}", flush=True)
 
 def host_mark(line):

@@ -24,9 +24,24 @@ Real lab invocation (paired with the actual MCX server, not this stand-in):
 
 Exit 0 on PASS. QEMU=/path/to/qemu-system-aarch64 (default ./qemu-system-aarch64).
 """
-import argparse, os, re, socket, struct, subprocess, sys, time
+import argparse, ctypes, os, re, signal, socket, struct, subprocess, sys, time
 
 QEMU = os.environ.get("QEMU", "./qemu-system-aarch64")
+
+PR_SET_PDEATHSIG = 1
+
+
+def die_with_parent():
+    """Ask the kernel to SIGKILL this child if its parent ever dies.
+
+    stop() below already kills the guest, but it runs from a finally block -
+    and a finally block dies with its interpreter. SIGKILL this script (or drop
+    the terminal) and the guest is orphaned with nothing left that can stop it.
+    A bound that lives in the PARENT is not a bound; put it in the kernel, where
+    it cannot be skipped and it survives a SIGKILL to us.
+    """
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+
 
 
 def assert_hello(data):
@@ -58,7 +73,8 @@ def run_client(port):
     # the client retries until our listener (the device/exporter) is up.
     cd = f"socket,id=ur0,host=127.0.0.1,port={port},server=off,reconnect-ms=500"
     p = subprocess.Popen(qemu_cmd(cd), stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, text=True)
+                         stderr=subprocess.STDOUT, text=True,
+                         start_new_session=True, preexec_fn=die_with_parent)
     try:
         conn, _ = lsock.accept()          # QEMU connected as client
         conn.settimeout(3)
@@ -82,7 +98,8 @@ def run_server(port):
     read QEMU's hello."""
     cd = f"socket,id=ur0,host=127.0.0.1,port={port},server=on,wait=off"
     p = subprocess.Popen(qemu_cmd(cd), stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, text=True)
+                         stderr=subprocess.STDOUT, text=True,
+                         start_new_session=True, preexec_fn=die_with_parent)
     sock = None
     deadline = time.time() + 10
     while time.time() < deadline:

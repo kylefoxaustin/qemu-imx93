@@ -25,7 +25,9 @@ Run:  QEMU=build-imx93/qemu-system-aarch64 python3 tests/usdhc-imx93/migrate.py
 """
 
 import json
+import ctypes
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -33,6 +35,25 @@ import tempfile
 import time
 
 QEMU = os.environ.get("QEMU", "build-imx93/qemu-system-aarch64")
+
+PR_SET_PDEATHSIG = 1
+
+
+def die_with_parent():
+    """Ask the kernel to SIGKILL this child if its parent ever dies.
+
+    close() below already kills the guest, but it runs from a finally block -
+    and a finally block dies with its interpreter. SIGKILL this script (or drop
+    the terminal) and the guest is orphaned with nothing left that can stop it:
+    a qtest QEMU blocked forever on a stdin that will never send another
+    command. That corpse burns 0% CPU, so it never shows up in a census sorted
+    by CPU, yet it still holds memory and its sockets. It is the most common way
+    a process outlives its run, and the hardest to notice.
+
+    A bound that lives in the PARENT is not a bound. Put it in the kernel: it
+    cannot be skipped, and it survives a SIGKILL to us.
+    """
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
 
 MACHINE = "imx93-11x11-evk"
 USDHC1 = 0x42850000
@@ -73,7 +94,9 @@ class Vm:
         if incoming:
             args += ["-incoming", incoming]
         self.p = subprocess.Popen(args, stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.PIPE, text=True)
+                                  stderr=subprocess.PIPE, text=True,
+                                  start_new_session=True,
+                                  preexec_fn=die_with_parent)
         self._connect()
 
     def _connect(self):
