@@ -22,8 +22,23 @@ echo "=== /proc/asound/pcm ==="
 cat /proc/asound/pcm 2>/dev/null
 
 if [ -x /pcm_play ]; then
-    echo "=== PLAYBACK on wm8962/SAI3 (hw:1,0) ==="
-    /pcm_play hw:1,0 1
+    # Find the wm8962 card by NAME. Card indices are assigned by the kernel in
+    # registration order, so they move: MICFIL registering shifted wm8962 from
+    # card 1 to card 2, and a test hardcoding hw:1,0 then played into a
+    # capture-only device and failed to open - silently, for as long as nobody
+    # read the console. An index is not an identity.
+    CARD=$(awk -F'[][ ]+' '/wm8962audio/ {print $2}' /proc/asound/cards | head -1)
+    if [ -z "$CARD" ]; then
+        echo "PLAY: FAIL (no wm8962audio card in /proc/asound/cards)"
+    else
+        echo "=== PLAYBACK on wm8962/SAI3 (hw:${CARD},0) ==="
+        /pcm_play "hw:${CARD},0" 1
+    fi
 fi
 echo "=== AUDIO TEST DONE ==="
+# Power off rather than spin: QEMU writes the wav header on close, so a killed
+# QEMU leaves a truncated capture and the samples - which ARE the assertion -
+# cannot be read back.
+sync
+/sbin/poweroff -f 2>/dev/null || poweroff -f 2>/dev/null
 while true; do sleep 5; done

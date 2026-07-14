@@ -126,7 +126,7 @@ groups:
         tests: [imx93-isi-test]
       - block: "SAI3 + WM8962 codec"
         tier: A
-        evidence: "Real PCM playback + WAV capture (-audio driver=wav); TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM"
+        evidence: "Real PCM playback ASSERTED on the captured samples: run.sh always captures to a wav (driver=wav opens a file, never a device - simultaneously the mute and the evidence) and check_wav.py requires peak == 8000, ~1s of signal, and a 436 Hz tone, so a datapath that scaled, truncated or mis-paced the stream fails. Mutation-verified: halving the amplitude and dropping half the samples each fail, and each is missed by the other's gate. TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM"
         tests: [imx93-sai-test, imx93-reset-test]
         notes: "SAI access width pinned to 16-bit for eDMA S16 writes"
       - block: "MICFIL (PDM mic) / XCVR"

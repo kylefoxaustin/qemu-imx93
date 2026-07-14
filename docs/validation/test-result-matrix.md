@@ -58,7 +58,7 @@ _Status column source: real meson testlog._
 | Media Block Control | B | — | Display/camera muxing for the above |  |
 | PXP (G2D 2D engine) | A | PASS (1) | copy/fill/blit/blend/rotate byte-exact (qtest + e2e); Weston composites through PXP | scale + CSC not modelled — libg2d/pxp_dma_v3 stack limit, not a model gap |
 | ISI + MIPI-CSI + MT9M114 / OV5640 | A | PASS (1) | Real V4L2 frames to /dev/video0; v4l2-compliance 48/48 ioctl + 55/55 streaming |  |
-| SAI3 + WM8962 codec | A | PASS (2) | Real PCM playback + WAV capture (-audio driver=wav); TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM | SAI access width pinned to 16-bit for eDMA S16 writes |
+| SAI3 + WM8962 codec | A | PASS (2) | Real PCM playback ASSERTED on the captured samples: run.sh always captures to a wav (driver=wav opens a file, never a device - simultaneously the mute and the evidence) and check_wav.py requires peak == 8000, ~1s of signal, and a 436 Hz tone, so a datapath that scaled, truncated or mis-paced the stream fails. Mutation-verified: halving the amplitude and dropping half the samples each fail, and each is missed by the other's gate. TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM | SAI access width pinned to 16-bit for eDMA S16 writes |
 | MICFIL (PDM mic) / XCVR | B | — | Driver bring-up |  |
 
 ## Accelerator (NPU)

@@ -47,35 +47,60 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 install -m755 "$HERE/myinit" "$TMP/myinit"
 
-# Build the playback oracle if an ALSA sysroot is available.
-PLAY_FILES="myinit"
-if [ -n "$ALSA_SYSROOT" ] && command -v "${CROSS}gcc" >/dev/null; then
-    # Link against the actual on-target libasound.so.2 from the rootfs.
-    ( cd "$TMP" && zcat "$BASE_INITRD" | cpio -id 'usr/lib/libasound.so.2*' \
-        2>/dev/null )
-    LASOUND=$(ls "$TMP"/usr/lib/libasound.so.2.* 2>/dev/null | head -1)
-    if [ -n "$LASOUND" ] && "${CROSS}gcc" -O2 -Wall \
-            -I"$ALSA_SYSROOT/usr/include" -o "$TMP/pcm_play" "$HERE/pcm_play.c" \
-            "$LASOUND" -Wl,--allow-shlib-undefined 2>/dev/null; then
-        PLAY_FILES="myinit
-pcm_play"
-        echo "built pcm_play oracle"
-    else
-        echo "note: could not build pcm_play; card-registration check only" >&2
-    fi
-else
-    echo "note: set ALSA_SYSROOT to build pcm_play; card-registration only" >&2
+# Build the playback oracle. The ALSA API headers are architecture-independent,
+# so the host's (libasound2-dev) serve as the sysroot; only the library must be
+# the on-target one, taken from the rootfs.
+( cd "$TMP" && zcat "$BASE_INITRD" | cpio -id 'usr/lib/libasound.so.2*' 2>/dev/null )
+LASOUND=$(ls "$TMP"/usr/lib/libasound.so.2.* 2>/dev/null | head -1)
+if ! command -v "${CROSS}gcc" >/dev/null || [ -z "$LASOUND" ] || \
+   ! "${CROSS}gcc" -O2 -Wall -I"$ALSA_SYSROOT/usr/include" \
+        -o "$TMP/pcm_play" "$HERE/pcm_play.c" "$LASOUND" \
+        -Wl,--allow-shlib-undefined 2>/dev/null; then
+    # Refuse to degrade into a weaker check that still looks like success. This
+    # test's whole claim is "real PCM reached the SAI"; without the oracle it
+    # cannot render that verdict, so it must not render one at all.
+    echo "SKIP: cannot build the pcm_play oracle (need ${CROSS}gcc, the ALSA"
+    echo "      headers under ALSA_SYSROOT, and libasound.so.2 in the rootfs)."
+    echo "      Without it there is no audio verdict, so this test claims none."
+    exit 0
 fi
 
-( cd "$TMP" && printf '%s\n' "$PLAY_FILES" | cpio -o -H newc 2>/dev/null \
+( cd "$TMP" && printf 'myinit\npcm_play\n' | cpio -o -H newc 2>/dev/null \
     > overlay.cpio )
 cat "$BASE_INITRD" "$TMP/overlay.cpio" > "$TMP/combined.cpio.gz"
 
-AUDIO=(-audio driver=none)  # muted by default; WAV= opts into capture
-[ -n "$WAV" ] && AUDIO=(-audio "driver=wav,path=$WAV")
+#
+# The capture is NOT optional, and that is the point.
+#
+# driver=wav opens a FILE, never a host device - so it is simultaneously the
+# MUTE (this test can never reach the developer's speakers, whatever the host
+# audio setup) and the EVIDENCE (the samples ARE the assertion). Making it
+# mandatory means the safe path is no longer the one you have to remember: the
+# test cannot render a verdict without it.
+#
+WAV=${WAV:-$TMP/capture.wav}
+LOG=$TMP/console.log
 
-set -x
-exec "$QEMU" -M imx93-11x11-evk -m 4G -display none "${AUDIO[@]}" \
+timeout -s KILL "${TMO:-240}" "$QEMU" -M imx93-11x11-evk -m 4G -display none \
+    -audio "driver=wav,path=$WAV" \
     -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/combined.cpio.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
-    -serial mon:stdio -serial null
+    -serial "file:$LOG" -serial null >/dev/null 2>&1 || true
+
+fail() { echo "FAIL: $*"; echo "--- console tail ---"; tail -20 "$LOG"; exit 1; }
+
+grep -q 'wm8962audio' "$LOG" || fail "the wm8962/SAI3 card never registered"
+# Match any card index: the kernel assigns them in registration order, so they
+# move. What must hold is that the wm8962 card played and drained, not that it
+# happened to land at a particular number.
+grep -qE 'PLAY\[hw:[0-9]+,0\]: PASS' "$LOG" || fail "pcm_play did not report PASS (the eDMA3 -> SAI3 datapath did not drain the stream)"
+[ -s "$WAV" ] || fail "no samples were captured: $WAV is missing or empty"
+
+# The samples are the assertion. pcm_play emits a 440 Hz square wave at
+# amplitude +/-8000, 48000 frames of S16 stereo - so a correct datapath yields
+# a capture whose peak is exactly 8000, whose frames arrive in full, and whose
+# sign toggles at the square wave's period. A mere "non-silent" check would
+# pass a datapath that dropped, scaled or mis-paced the stream.
+python3 "$HERE/check_wav.py" "$WAV" || fail "the captured samples are not the square wave that was played"
+
+echo "PASS: real PCM through wm8962/SAI3 -> eDMA3 cyclic -> captured square wave verified ($WAV)"
