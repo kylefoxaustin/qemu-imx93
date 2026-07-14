@@ -67,6 +67,19 @@
 #define WM8962_SAMPLE_RATE_MASK     0x0007
 #define WM8962_SAMPLE_RATE_INT_MODE 0x0010
 
+/*
+ * R27 resets to 0x0010 - SR field 0 with SAMPLE_RATE_INT_MODE set, i.e. 48 kHz.
+ *
+ * That reset value is load-bearing, not decoration. The driver programs this
+ * register with regmap update_bits, which writes NOTHING when the value is
+ * unchanged - so a guest playing at 48 kHz, the codec's power-on rate, never
+ * touches it and the codec is never asked to say anything. If we came up at 0,
+ * we would announce no rate at all, and the SAI - which is the bit-clock slave
+ * and has no other way to learn it - would be left inventing one. It would then
+ * be right at 48 kHz by coincidence and wrong everywhere else.
+ */
+#define WM8962_ADDITIONAL_CONTROL_3_RESET 0x0010
+
 OBJECT_DECLARE_SIMPLE_TYPE(Wm8962State, WM8962)
 
 struct Wm8962State {
@@ -197,10 +210,18 @@ static void wm8962_reset(DeviceState *dev)
 
     memset(s->regs, 0, sizeof(s->regs));
     s->regs[WM8962_SOFTWARE_RESET] = WM8962_DEVICE_ID;
+    s->regs[WM8962_ADDITIONAL_CONTROL_3] = WM8962_ADDITIONAL_CONTROL_3_RESET;
     s->ptr = 0;
     s->wphase = 0;
     s->rphase = 0;
-    s->rate = 0;
+
+    /*
+     * Announce the power-on rate. We are the bit-clock master: whoever we clock
+     * cannot know the rate unless we say it, and after this the driver may never
+     * write the register again (see the reset value above).
+     */
+    s->rate = wm8962_decode_rate(WM8962_ADDITIONAL_CONTROL_3_RESET);
+    qemu_set_irq(s->rate_out, s->rate);
 }
 
 static const VMStateDescription vmstate_wm8962 = {

@@ -80,6 +80,7 @@ struct IMX93SaiState {
      * it. 0 until the codec says otherwise.
      */
     uint32_t  rate;
+    bool      warned_no_rate;
     uint8_t   cap[IMX93_SAI_CAP_SIZE];   /* played PCM awaiting the backend */
     uint32_t  cap_head;
     uint32_t  cap_count;

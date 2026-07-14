@@ -30,6 +30,7 @@
 #include "hw/core/irq.h"
 #include "migration/vmstate.h"
 #include "qemu/timer.h"
+#include "qemu/log.h"
 #include "qemu/module.h"
 
 /* Register map (reg_offset = 8: VERID/PARAM precede the control regs). */
@@ -86,10 +87,26 @@
  */
 #define SAI_DEFAULT_RATE 48000
 
-static inline int64_t imx93_sai_word_ns(const IMX93SaiState *s)
+static inline int64_t imx93_sai_word_ns(IMX93SaiState *s)
 {
-    uint32_t rate = s->rate ? s->rate : SAI_DEFAULT_RATE;
+    uint32_t rate = s->rate;
 
+    if (!rate) {
+        /*
+         * We are the bit-clock slave and the codec has not told us a rate, so
+         * strictly there is no clock to run at. Say so once and fall back to a
+         * sane period rather than a zero one: a period of 0 schedules a deadline
+         * already in the past and the timer livelocks. A clock that is not
+         * running must not run infinitely fast.
+         */
+        if (!s->warned_no_rate) {
+            s->warned_no_rate = true;
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "imx93-sai: transmitting with no rate from the codec; "
+                          "pacing at %d Hz\n", SAI_DEFAULT_RATE);
+        }
+        rate = SAI_DEFAULT_RATE;
+    }
     return NANOSECONDS_PER_SECOND / ((int64_t)rate * 2);
 }
 
