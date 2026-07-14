@@ -218,7 +218,7 @@ readme_groups:
       evidence: "5/5 byte-checked frames off /dev/video0 (parallel + MIPI-CSI2); host-image virtual camera",
       blocks: ["ISI + MIPI-CSI + MT9M114 / OV5640"] }
   - { label: "Audio — SAI3/WM8962 play + capture", tier: A,
-      evidence: "Real PCM via cyclic eDMA2; -audio driver=wav captures a played square wave byte-correct; concurrent streams",
+      evidence: "Real PCM via cyclic eDMA2; -audio driver=wav captures the played square wave and the test asserts its values - peak, a full second of signal, and the 436 Hz tone (QEMU's mixer resamples the capture, so the signal is checked, not the bytes); concurrent streams. Playback rate is fixed at 48 kHz - see Known limitations",
       blocks: ["SAI3 + WM8962 codec"] }
   - { label: "PXP 2D (G2D)", tier: A,
       evidence: "copy/fill/blit/src-over-blend/rotate byte-exact (libg2d -> /dev/pxp_device -> model); use-g2d=true Weston composites through it",

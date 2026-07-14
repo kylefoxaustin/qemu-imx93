@@ -107,7 +107,7 @@ failure).
 | Storage — uSDHC | A | SDHCI ADMA; ext4 mmcblk0 r/w/sync from -drive if=sd |
 | Display — LCDIFv3 → DSI → ADV7535 → HDMI (+ LVDS) | A | 1920x1080 /dev/fb0, framebuffer scanned out + screendump byte-correct; fbcon login |
 | Camera — MT9M114/OV5640 → CSI → ISI → V4L2 | A | 5/5 byte-checked frames off /dev/video0 (parallel + MIPI-CSI2); host-image virtual camera |
-| Audio — SAI3/WM8962 play + capture | A | Real PCM via cyclic eDMA2; -audio driver=wav captures a played square wave byte-correct; concurrent streams |
+| Audio — SAI3/WM8962 play + capture | A | Real PCM via cyclic eDMA2; -audio driver=wav captures the played square wave and the test asserts its values - peak, a full second of signal, and the 436 Hz tone (QEMU's mixer resamples the capture, so the signal is checked, not the bytes); concurrent streams. Playback rate is fixed at 48 kHz - see Known limitations |
 | PXP 2D (G2D) | A | copy/fill/blit/src-over-blend/rotate byte-exact (libg2d -> /dev/pxp_device -> model); use-g2d=true Weston composites through it |
 | LPUART ×8 | A | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact |
 | LPSPI ×8 | A | Per-bus SSI master; is25lp064 JEDEC byte-exact; drives board-to-board SPI (spi-link) |
@@ -184,6 +184,14 @@ Correctness rests on **five independent gates**, not one:
    [`docs/validation/gen-matrix.py`](docs/validation/gen-matrix.py), which reads
    Tier from `test-matrix.yaml` and stamps the result from the run — it gates on
    any qtest regression.
+   Among them, `imx93-reset-test` pins **reset values against the Reference
+   Manual** (ADC, WDOG, eDMA, LCDIF, FlexCAN, uSDHC, BBNSM). A reset value is a
+   claim the model makes on the silicon's behalf: the guest can read it,
+   read-modify-write it, and launder it straight back into its own configuration
+   — so a wrong one is invisible to every functional test (nothing in the model
+   reads the bits) and wrong on hardware. `tests/usdhc-imx93/migrate.py` covers
+   the same register across a live migration, asserting both the value *and* that
+   the vmstate subsection is genuinely omitted when it should be.
 2. **AddressSanitizer + UBSan** sweep of the device models (zero findings).
 3. **24-hour concurrent soak** ([`tests/soak/`](tests/soak/)) — every datapath
    concurrent (audio / NPU / PXP / I3C / camera / display / storage / net) across
@@ -200,6 +208,32 @@ worse than none: every device qtest here was **mutation-audited** — its model'
 load-bearing behavior deliberately broken (a corrupted DMA byte, a disabled FIFO
 drain, a skipped reset, a wrong device id) to confirm the test then goes red — so
 a passing run means the check can catch a regression, not that it is decoration.
+
+Three sharper corollaries, each paid for by a real defect that had passed a green
+suite — they are why the gates above are worded the way they are:
+
+- **A test written against the model, rather than against the manual, ratifies
+  whatever the model does.** Two qtests here were mutation-sound *and* pinning a
+  bug: `flexcan-test` asserted a controller that receives while **disabled**, and
+  `imx93-lpi2c-test` pinned a `PARAM` that advertised a FIFO **twice** the real
+  depth (the driver sizes its watermark from that field). Both went red on any
+  model change. Both were guarding the defect. Reset values and capability
+  registers are now asserted against the **Reference Manual**, not against the
+  model's own prior behaviour.
+- **An assertion that fires for *a* mutation is not proven to fire for the *right*
+  one.** A `QEMU_BUILD_BUG_ON` guarding the LPI2C FIFO depth fired when tested —
+  and could not fire for the drift it existed to catch, because both of its sides
+  restated the same constant. It now decodes the advertised depth from `PARAM` the
+  way the guest decodes it, and compares it to `ARRAY_SIZE` of the array actually
+  stored into.
+- **A test that only ever asks one question cannot see an assumption it shares.**
+  The audio oracle asserted amplitude, duration and tone — and was blind to sample
+  *rate*, because it only ever played 48 kHz, which is exactly what the SAI
+  assumes (see Known limitations). Only a second operating point exposed it — and
+  exposed, in the same run, that the "obvious" fix (deriving the rate from the
+  SAI's own divider registers) is a correct-looking formula that computes the
+  wrong number on this board. It was **not** shipped; the gap is declared and
+  demonstrable instead.
 Fidelity judgments (the NPU honest-fault
 discipline, the PXP scale/CSC boundary) live in
 [`docs/validation/fidelity-audit.md`](docs/validation/fidelity-audit.md). The
@@ -279,7 +313,8 @@ initramfs and interconnect oracles.
 | `hw/net/imx93_dwmac.c`, `hw/net/can/flexcan.c`, `hw/dma/imx93_edma.c` | eQOS dwmac4, FlexCAN, eDMA1/2 (one-shot TCD + cyclic SG) |
 | `hw/i2c/imx_lpi2c.c` + `i2c_link.c`, `hw/ssi/imx93_lpspi.c` + `spi_link.c`, `net/can/can_host_chardev.c` | LPI2C/LPSPI masters + the **interconnect bridge devices** (i2c-link, spi-link, can-host-chardev) |
 | `hw/char/imx_lpuart.c`, `hw/i2c/{mt9m114,ov5640}.c`, `hw/gpio/imx93_gpio.c`, `hw/i3c/svc_i3c.c` | LPUART (+ DMA-RX), camera sensors, GPIO, Silvaco I3C |
-| `tests/qtest/imx93-*-test.c`, `tests/qtest/ethos-u-test.c` | kernel-free qtests on the machine |
+| `tests/qtest/imx93-*-test.c`, `tests/qtest/ethos-u-test.c` | kernel-free qtests on the machine (incl. `imx93-reset-test`: reset values vs the Reference Manual) |
+| `tests/usdhc-imx93/migrate.py` | live-migration oracle for the uSDHC `VEND_SPEC` vmstate subsection (value **and** wire format) |
 | `tests/interconnect-imx93/` | board-to-board links: `run-{eth,uart,spi,can,i2c}.sh` + `run-spi-mcx.sh` (cross-SoC) |
 | `tests/{boot,login,weston,gstreamer}-imx93/`, `tests/{audio,camera,pxp,flexio,i3c}-imx93/` | boot/desktop + per-subsystem data-path oracles |
 | `tests/{m33-boot,m33-rpmsg,npu,ethosu-rpmsg,ethosu-caps,ethosu-infer}-*` | M33 bring-up, RPMsg, and the Ethos-U65 driver / round-trip / bit-exact inference |
@@ -297,6 +332,17 @@ initramfs and interconnect oracles.
   status`) instead of being handed a fabricated success. Boot is unaffected.
   `-global driver=imx93.ele,property=fake-uncomputed-success,value=on` restores
   the old blanket-success behaviour for debugging.
+- **Audio playback is fixed at 48 kHz.** The SAI opens its audio backend at a
+  hardcoded 48 kHz and does not follow the rate the guest asked for, so a 16 kHz
+  stream is clocked out three times too fast. The rate is not recoverable from
+  the SAI: on this board it is a **bit-clock slave** (`TCR2.BCD_MSTR` is clear —
+  the WM8962 drives BCLK/LRCLK), so the rate is set in the *codec* over I²C, and
+  the codec model is a register store that does not yet decode its clocking.
+  48 kHz — what the EVK's ALSA stack uses by default — is verified end to end on
+  the captured samples. Demonstrate the gap with
+  `RATES="48000 16000" tests/audio-imx93/run.sh` (the 16 kHz case fails, with the
+  tone transposed from 145 Hz up to 436 Hz). Closing it means teaching
+  `hw/audio/wm8962.c` to derive its configured rate and hand it to the SAI.
 - **First-boot time is dominated by initramfs decompression under TCG** — a
   ~430 MB rootfs unpacks to ~1.3 GB tmpfs (~12 s here). Not a hang; a small
   busybox initramfs boots far faster.
