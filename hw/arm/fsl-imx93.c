@@ -1209,8 +1209,17 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
                     fsl_imx93_memmap[FSL_IMX93_I3C1].addr);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->i3c1), 0,
                        qdev_get_gpio_in(gicdev, FSL_IMX93_I3C1_IRQ));
-    i2c_slave_create_simple(s->i3c1.bus->i2c_bus, TYPE_WM8962,
-                            FSL_IMX93_WM8962_ADDR);
+    /*
+     * The i3c device tree moves the WM8962 onto the I3C bus as a legacy I2C
+     * target. It is the same codec clocking the same SAI3, so it needs the same
+     * rate wire: without it that DTB would take its rate from the LPI2C1 codec
+     * the guest is not talking to, and follow a rate nobody asked for.
+     */
+    qdev_connect_gpio_out_named(
+        DEVICE(i2c_slave_create_simple(s->i3c1.bus->i2c_bus, TYPE_WM8962,
+                                       FSL_IMX93_WM8962_ADDR)),
+        "rate", 0,
+        qdev_get_gpio_in_named(DEVICE(&s->sai[2]), "codec-rate", 0));
 
     /* All peripherals not yet modeled get logging stubs. */
     /*
