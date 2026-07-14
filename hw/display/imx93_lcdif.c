@@ -376,6 +376,14 @@ static void lcdif_reset(DeviceState *dev)
     IMX93LcdifState *s = IMX93_LCDIF(dev);
 
     memset(s->regs, 0, sizeof(s->regs));
+    /*
+     * RM CTRL reset = 0x8000_0000: SW_RESET asserted. Silicon holds the
+     * display block in software reset until firmware releases it (writes 0);
+     * coming up released is the forgiving direction. SW_RESET self-clears on
+     * the first CTRL write here, and scanout gates on CTRLDESCL0_5.EN (not on
+     * SW_RESET), so the working display path is unchanged.
+     */
+    s->regs[LCDC_V8_CTRL >> 2] = CTRL_SW_RESET;
     s->fb_base = 0;
     s->src_width = 0;
     s->rows = 0;
