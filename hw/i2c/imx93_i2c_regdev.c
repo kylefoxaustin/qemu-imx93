@@ -77,16 +77,37 @@ static void imx93_i2c_regdev_reset(DeviceState *dev)
     s->regs[0] = s->reg0;
     if (s->pca9450) {
         /*
-         * Preset the BUCK/LDO voltage-select registers to selectors inside
-         * each rail's DT-constrained range. With the power-on default of 0
-         * (lowest voltage) the pca9450 driver fails to register the rails
-         * whose DT minimum is well above that (it returns on the first such
-         * failure), e.g. "Failed to register regulator(buck4): -22".
+         * BRING-UP SCAFFOLDING - these are NOT the PCA9451A's silicon defaults.
+         *
+         * The real part powers up with OTP-programmed selectors; this model
+         * starts every register at 0 (the memset above), which is itself not a
+         * physical state. From 0 (lowest voltage) the pca9450 driver refuses to
+         * register the rails whose DT minimum is well above that, returning on
+         * the first failure ("Failed to register regulator(buck4): -22"). So we
+         * seed the voltage-select registers to *a* selector inside each rail's
+         * DT-constrained range - enough to let the rails register and unblock
+         * uSDHC et al. - chosen to satisfy the driver, not to match the chip.
+         *
+         * They are therefore wrong as silicon values: e.g. BUCK4 is the EVK's
+         * 3.3V SD supply (per the PCA9451A fact sheet) but reads back ~1.625V
+         * here. The driver reads these live - REGCACHE_MAPLE with no
+         * reg_defaults, so there is no stale-cache "update_bits skips the write"
+         * hazard - which makes this a visible fidelity gap, not a silent one:
+         * a guest that reads a regulator's voltage before its consumer sets it
+         * gets a fabricated number. It does not block boot (soak-proven) and the
+         * registers stay writable, so voltage switching still works.
+         *
+         * TODO: replace with the true OTP power-on defaults. That needs the full
+         * PCA9451A datasheet register/OTP table; 93_docs/ currently holds only
+         * the 2-page fact sheet (nominal rail voltages, no register map), so the
+         * correct values are not yet in hand. Do NOT swap these for other
+         * guessed selectors - a plausible wrong number is worse than an honest
+         * scaffold, because it reads as measured.
          */
-        s->regs[0x1A] = 0x29;   /* BUCK4OUT: 1.625V  (DT 1.62-3.40V) */
-        s->regs[0x1C] = 0x29;   /* BUCK5OUT: 1.625V  (DT 1.62V+)     */
-        s->regs[0x1E] = 0x14;   /* BUCK6OUT: 1.100V  (DT 1.06-1.14V) */
-        s->regs[0x21] = 0x01;   /* LDO1CTRL vsel: 1.7V (DT 1.62-1.98V) */
+        s->regs[0x1A] = 0x29;   /* BUCK4OUT: DT-range scaffold (silicon: 3.3V SD rail) */
+        s->regs[0x1C] = 0x29;   /* BUCK5OUT: DT-range scaffold (silicon: 1.8V)         */
+        s->regs[0x1E] = 0x14;   /* BUCK6OUT: DT-range scaffold (silicon: 1.1V)         */
+        s->regs[0x21] = 0x01;   /* LDO1CTRL: DT-range scaffold (silicon: 1.8V)         */
     }
     if (s->pcal6524) {
         /*

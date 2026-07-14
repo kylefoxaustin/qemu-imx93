@@ -54,6 +54,7 @@ the point — a caveat in the open is the opposite of a silent fail.
 | **NPU mlw decoder** | `hw/npu/mlw` is Apache-2.0 | Upstream-licensing blocker for the NPU only; scopes NPU to bring-up for upstream, does not block the core machine |
 | **NPU nasnet** | ±1-rounding accumulation, occasional argmax flip on the deepest degenerate-int8 model | Isolation-blocked and capped; every real trained workload tested is bit-exact, every micro-op passes ≤±1 in isolation |
 | **ELE soc_id** (cross-fleet note) | i.MX91's ELE reports the 93's `soc_id` (chop-down artifact) | i.MX91's item; noted here only because 93 is the derivation parent |
+| **PCA9451A PMIC reset values** | The 4 BUCK4/5/6 + LDO1 voltage-select resets in `hw/i2c/imx93_i2c_regdev.c` are **bring-up scaffolding chosen to satisfy the pca9450 driver's DT constraints, not the chip's OTP power-on defaults** — e.g. BUCK4 (the EVK 3.3V SD supply) reads back ~1.625V | **Visible, not silent:** the driver reads them live (`REGCACHE_MAPLE`, no `reg_defaults`, so no update-bits skip hazard); boot is unaffected (soak-proven). A guest reading a rail's voltage before its consumer sets it gets a fabricated number. **Correct fix needs the full PCA9451A datasheet register/OTP table** — `93_docs/` holds only the 2-page fact sheet, so the true values are not yet in hand; comment now states this and forbids swapping in other guessed selectors |
 
 ## Silent-fail audit posture
 
