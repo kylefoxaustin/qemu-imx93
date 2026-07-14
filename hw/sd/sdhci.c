@@ -1519,16 +1519,19 @@ static bool sdhci_pending_insert_vmstate_needed(void *opaque)
 }
 
 /*
- * VEND_SPEC is only live on i.MX (vendor_spec_reset != 0). Migrate it as an
- * opt-in subsection so generic/eSDHC snapshots keep their exact wire format;
- * the driver read-modify-writes VEND_SPEC, so a lost value desyncs the soft
- * clock-gate bits it carries from PRNSTS across a snapshot.
+ * Migrate VEND_SPEC as an opt-in subsection. An omitted subsection leaves the
+ * field holding exactly what reset() wrote, so it may be dropped iff the live
+ * value already equals the reset value - migrate it precisely when it differs.
+ * This keeps the generic-SDHCI wire format byte-for-byte unchanged (its value
+ * never leaves 0), and still carries a value the driver read-modify-wrote,
+ * including an i.MX6/7 guest that wrote FRC_SDCLK_ON over a zero reset (a
+ * predicate keyed on "reset != 0" or "value != 0" loses one of those cases).
  */
 static bool sdhci_vendor_spec_vmstate_needed(void *opaque)
 {
     SDHCIState *s = opaque;
 
-    return s->vendor_spec_reset != 0;
+    return s->vendor_spec != s->vendor_spec_reset;
 }
 
 static const VMStateDescription sdhci_vendor_spec_vmstate = {
