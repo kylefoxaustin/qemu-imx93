@@ -37,10 +37,28 @@
  * assertion below keeps that true if either number is ever changed.
  */
 #define LPI2C_PARAM_VALUE   0x00000303u
-#define LPI2C_FIFO_ADVERTISED   8       /* 2^3, as encoded in PARAM above */
 
-/* Never advertise a FIFO deeper than the one this model actually provides. */
-QEMU_BUILD_BUG_ON(IMX_LPI2C_RXFIFO_SIZE < LPI2C_FIFO_ADVERTISED);
+/*
+ * Never advertise a FIFO deeper than the one this model actually provides.
+ *
+ * Both sides of this are read from the thing they describe, not restated:
+ * the advertised depth is DECODED FROM PARAM the way the guest decodes it
+ * (i2c-imx-lpi2c does 1 << (PARAM & 0xf)), and the delivered depth is the
+ * size of the array we actually store into. A hand-written "advertised = 8"
+ * beside PARAM, or a comparison against the RXFIFO_SIZE macro rather than the
+ * array, would be two spellings of one belief agreeing with itself: respell
+ * either and the assertion passes blind while the model over-promises.
+ *
+ * The test is >, not !=: the model may hold MORE than it advertises. Over-
+ * delivering is safe in both worlds - a guest sized against the silicon's FIFO
+ * always fits in a larger one, here and on the board. Advertising more than we
+ * hold is the unsafe direction, and it fails only on hardware.
+ */
+#define LPI2C_RXFIFO_MASK       0xf
+#define LPI2C_FIFO_ADVERTISED   (1u << ((LPI2C_PARAM_VALUE >> 8) & LPI2C_RXFIFO_MASK))
+
+QEMU_BUILD_BUG_ON(LPI2C_FIFO_ADVERTISED >
+                  ARRAY_SIZE(((IMXLPI2CState *)0)->rxfifo));
 #define LPI2C_MSR       0x14
 #define LPI2C_MIER      0x18
 #define LPI2C_MCFGR0    0x20
