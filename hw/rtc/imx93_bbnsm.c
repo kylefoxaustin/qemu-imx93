@@ -36,6 +36,18 @@
 #define TA_EN_MSK       (0x3 << 2)
 #define EVENT_TA        (0x2 << 2)   /* time-alarm event in EVENTS */
 
+/*
+ * BBNSM_CTRL reset value per the i.MX 93 RM: 0x0100_0005.
+ * RTC_EN and TA_EN are two-bit safety-encoded (01 = disabled, 10 = enabled),
+ * so a security block cannot arm on a single flipped bit. They reset to 01 -
+ * explicitly, verifiably disabled - not 00, which is NEITHER encoding and a
+ * state no silicon reset yields. The driver read-modify-writes CTRL, so a 00
+ * reset would launder an impossible field back into its own config. DUMB_PMIC
+ * enable (bit 24) is set at reset. Our enable checks key on the 10 bit, so the
+ * 01 fields still read "disabled" - behaviour is unchanged.
+ */
+#define BBNSM_CTRL_RESET 0x01000005u
+
 #define RTC_HZ          32768
 #define RTC_SECS_SHIFT  15
 #define RTC_COUNTER_MASK ((1ULL << 47) - 1)
@@ -175,7 +187,7 @@ static void bbnsm_reset_hold(Object *obj, ResetType type)
 {
     IMX93BbnsmState *s = IMX93_BBNSM(obj);
 
-    s->ctrl = 0;
+    s->ctrl = BBNSM_CTRL_RESET;   /* RTC_EN/TA_EN = 01 (valid "disabled"), not 00 */
     s->int_en = 0;
     s->events = 0;
     s->pad_ctrl = 0;

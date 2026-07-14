@@ -26,6 +26,8 @@
 #define SAI1    0x443b0000
 #define USDHC1  0x42850000
 #define USDHC_VEND_SPEC 0xc0
+#define BBNSM1  0x44440000
+#define BBNSM_CTRL 0x08
 
 /* SAI TCSR + flag bits. */
 #define SAI_TCSR    0x08
@@ -172,6 +174,22 @@ static void test_usdhc_vend_spec_reset(void)
     qtest_quit(qts);
 }
 
+static void test_bbnsm_ctrl_reset(void)
+{
+    QTestState *qts = qtest_init("-machine imx93-11x11-evk -accel qtest");
+
+    /*
+     * RM BBNSM_CTRL reset = 0x0100_0005. RTC_EN[1:0] and TA_EN[3:2] are two-bit
+     * safety-encoded (01 = disabled, 10 = enabled); they reset to 01, the valid
+     * "disabled" state - not 00, which is neither encoding and impossible on
+     * silicon. The driver read-modify-writes CTRL, so 00 would launder an
+     * illegal field back into its own config.
+     */
+    g_assert_cmphex(qtest_readl(qts, BBNSM1 + BBNSM_CTRL), ==, 0x01000005);
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -182,5 +200,6 @@ int main(int argc, char **argv)
     qtest_add_func("/imx93/reset/flexcan", test_flexcan_reset);
     qtest_add_func("/imx93/reset/sai-disabled-flags", test_sai_disabled_flags);
     qtest_add_func("/imx93/reset/usdhc-vend-spec", test_usdhc_vend_spec_reset);
+    qtest_add_func("/imx93/reset/bbnsm-ctrl", test_bbnsm_ctrl_reset);
     return g_test_run();
 }
