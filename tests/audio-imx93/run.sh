@@ -65,10 +65,6 @@ if ! command -v "${CROSS}gcc" >/dev/null || [ -z "$LASOUND" ] || \
     exit 0
 fi
 
-( cd "$TMP" && printf 'myinit\npcm_play\n' | cpio -o -H newc 2>/dev/null \
-    > overlay.cpio )
-cat "$BASE_INITRD" "$TMP/overlay.cpio" > "$TMP/combined.cpio.gz"
-
 #
 # The capture is NOT optional, and that is the point.
 #
@@ -78,29 +74,55 @@ cat "$BASE_INITRD" "$TMP/overlay.cpio" > "$TMP/combined.cpio.gz"
 # mandatory means the safe path is no longer the one you have to remember: the
 # test cannot render a verdict without it.
 #
-WAV=${WAV:-$TMP/capture.wav}
+# RATES selects the playback rate(s). The rate is an argument rather than a
+# constant because a model that assumes one rate is invisible to a test that
+# only ever asks for that rate - see the KNOWN GAP below.
+#
+#   RATES="48000 16000" bash run.sh
+#
+# demonstrates it: on this board the SAI is a bit-clock SLAVE (TCR2.BCD_MSTR is
+# clear - the wm8962 codec drives BCLK/LRCLK), so the frame rate is set in the
+# CODEC over I2C and is not derivable from any SAI register. Our SAI opens its
+# audio backend at a hardcoded 48 kHz, so a 16 kHz stream is clocked out three
+# times too fast: the capture comes back a third of a second long with the tone
+# transposed from 145 Hz up to 436 Hz. Closing it needs the wm8962 model - today
+# a register store that never decodes its clocking - to derive its rate and hand
+# it to the SAI. Declared, demonstrable, and not silent.
+#
+RATES=${RATES:-48000}
 LOG=$TMP/console.log
-
-timeout -s KILL "${TMO:-240}" "$QEMU" -M imx93-11x11-evk -m 4G -display none \
-    -audio "driver=wav,path=$WAV" \
-    -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/combined.cpio.gz" \
-    -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
-    -serial "file:$LOG" -serial null >/dev/null 2>&1 || true
+WAVDIR=${WAVDIR:-$TMP}
 
 fail() { echo "FAIL: $*"; echo "--- console tail ---"; tail -20 "$LOG"; exit 1; }
 
-grep -q 'wm8962audio' "$LOG" || fail "the wm8962/SAI3 card never registered"
-# Match any card index: the kernel assigns them in registration order, so they
-# move. What must hold is that the wm8962 card played and drained, not that it
-# happened to land at a particular number.
-grep -qE 'PLAY\[hw:[0-9]+,0\]: PASS' "$LOG" || fail "pcm_play did not report PASS (the eDMA3 -> SAI3 datapath did not drain the stream)"
-[ -s "$WAV" ] || fail "no samples were captured: $WAV is missing or empty"
+for RATE in $RATES; do
+    echo "$RATE" > "$TMP/rate"
+    ( cd "$TMP" && printf 'myinit\npcm_play\nrate\n' | cpio -o -H newc \
+        2>/dev/null > overlay.cpio )
+    cat "$BASE_INITRD" "$TMP/overlay.cpio" > "$TMP/combined.cpio.gz"
 
-# The samples are the assertion. pcm_play emits a 440 Hz square wave at
-# amplitude +/-8000, 48000 frames of S16 stereo - so a correct datapath yields
-# a capture whose peak is exactly 8000, whose frames arrive in full, and whose
-# sign toggles at the square wave's period. A mere "non-silent" check would
-# pass a datapath that dropped, scaled or mis-paced the stream.
-python3 "$HERE/check_wav.py" "$WAV" || fail "the captured samples are not the square wave that was played"
+    WAV="$WAVDIR/capture-$RATE.wav"
+    rm -f "$WAV"
 
-echo "PASS: real PCM through wm8962/SAI3 -> eDMA3 cyclic -> captured square wave verified ($WAV)"
+    timeout -s KILL "${TMO:-240}" "$QEMU" -M imx93-11x11-evk -m 4G -display none \
+        -audio "driver=wav,path=$WAV" \
+        -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/combined.cpio.gz" \
+        -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
+        -serial "file:$LOG" -serial null >/dev/null 2>&1 || true
+
+    grep -q 'wm8962audio' "$LOG" || fail "[$RATE Hz] the wm8962/SAI3 card never registered"
+    # Match any card index: the kernel assigns them in registration order, so
+    # they move. What must hold is that the wm8962 card played and drained, not
+    # that it happened to land at a particular number.
+    grep -qE 'PLAY\[hw:[0-9]+,0\]: PASS' "$LOG" || \
+        fail "[$RATE Hz] pcm_play did not report PASS (the eDMA3 -> SAI3 datapath did not drain the stream)"
+    [ -s "$WAV" ] || fail "[$RATE Hz] no samples were captured: $WAV is missing or empty"
+
+    # The samples are the assertion: peak (nothing scaled them), duration
+    # (nothing truncated them) and TONE (they were clocked out at the rate the
+    # guest asked for).
+    python3 "$HERE/check_wav.py" "$WAV" "$RATE" || \
+        fail "[$RATE Hz] the captured samples are not the square wave that was played"
+done
+
+echo "PASS: real PCM through wm8962/SAI3 -> eDMA3 cyclic, verified at $RATES Hz"

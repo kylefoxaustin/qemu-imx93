@@ -17,8 +17,14 @@
 int main(int argc, char **argv)
 {
     const char *dev = argc > 1 ? argv[1] : "hw:1,0";
-    unsigned int rate = 48000, chans = 2;
     unsigned int secs = argc > 2 ? atoi(argv[2]) : 2;
+    /*
+     * The rate is an ARGUMENT, not a constant. A SAI that assumes one rate is
+     * invisible to a test that only ever asks for that rate - so the test has
+     * to be able to ask for another one.
+     */
+    unsigned int rate = argc > 3 ? (unsigned int)atoi(argv[3]) : 48000;
+    unsigned int chans = 2;
     snd_pcm_t *pcm;
     int err, i, bytes = 2;
     long frames = (long)rate * secs;

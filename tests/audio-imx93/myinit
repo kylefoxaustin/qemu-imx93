@@ -28,11 +28,14 @@ if [ -x /pcm_play ]; then
     # capture-only device and failed to open - silently, for as long as nobody
     # read the console. An index is not an identity.
     CARD=$(awk -F'[][ ]+' '/wm8962audio/ {print $2}' /proc/asound/cards | head -1)
+    # The rate is chosen by the harness, not baked in: a SAI that assumes one
+    # rate is invisible to a test that only ever asks for that rate.
+    RATE=$(cat /rate 2>/dev/null || echo 48000)
     if [ -z "$CARD" ]; then
         echo "PLAY: FAIL (no wm8962audio card in /proc/asound/cards)"
     else
-        echo "=== PLAYBACK on wm8962/SAI3 (hw:${CARD},0) ==="
-        /pcm_play "hw:${CARD},0" 1
+        echo "=== PLAYBACK on wm8962/SAI3 (hw:${CARD},0) at ${RATE} Hz ==="
+        /pcm_play "hw:${CARD},0" 1 "$RATE"
     fi
 fi
 echo "=== AUDIO TEST DONE ==="

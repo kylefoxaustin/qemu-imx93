@@ -29,10 +29,13 @@ import os
 import struct
 import sys
 
-# What pcm_play actually plays (see pcm_play.c).
-SRC_RATE = 48000
+# What pcm_play plays (see pcm_play.c). The square wave flips sign every 55
+# frames AT THE PLAYBACK RATE, so its tone scales with that rate: 436 Hz at
+# 48 kHz, 145 Hz at 16 kHz. That is the whole point of running more than one
+# rate - a SAI that ignores the guest's rate and plays everything at 48 kHz
+# renders the 16 kHz stream three times too fast, and its tone comes back at
+# 436 Hz instead of 145 Hz. One operating point cannot see that.
 SRC_HALF_PERIOD = 55                       # frames between sign flips
-SRC_TONE_HZ = SRC_RATE / (2 * SRC_HALF_PERIOD)   # 436.36 Hz
 SRC_PEAK = 8000
 SRC_SECONDS = 1
 
@@ -66,6 +69,11 @@ def parse_wav(path):
 
 def main():
     path = sys.argv[1]
+    # The rate the GUEST asked for - not the rate of the capture, which QEMU's
+    # mixer resamples. The tone is what carries across that resampling.
+    play_rate = int(sys.argv[2]) if len(sys.argv) > 2 else 48000
+    src_tone = play_rate / (2 * SRC_HALF_PERIOD)
+
     chans, rate, samples = parse_wav(path)
     left = samples[0::chans] if chans else samples
 
@@ -83,8 +91,9 @@ def main():
     half_period = len(nonzero) / flips if flips else 0
     tone = rate / (2 * half_period) if half_period else 0
 
-    stats = (f"{len(left)} frames, {chans}ch, {rate} Hz, peak {peak}, "
-             f"{len(nonzero)} carrying signal, tone {tone:.1f} Hz")
+    stats = (f"played {play_rate} Hz -> captured {len(left)} frames, {chans}ch, "
+             f"{rate} Hz, peak {peak}, {len(nonzero)} carrying signal, "
+             f"tone {tone:.1f} Hz (want {src_tone:.1f})")
 
     if os.environ.get("MEASURE"):
         print(f"capture: {stats}")
@@ -100,11 +109,12 @@ def main():
         fails.append(f"only {len(nonzero)} frames carry signal, expected about "
                      f"{want_frames}: the stream was truncated or under-ran")
 
-    lo = SRC_TONE_HZ * (1 - TONE_TOLERANCE)
-    hi = SRC_TONE_HZ * (1 + TONE_TOLERANCE)
+    lo = src_tone * (1 - TONE_TOLERANCE)
+    hi = src_tone * (1 + TONE_TOLERANCE)
     if not (lo <= tone <= hi):
-        fails.append(f"tone is {tone:.1f} Hz, expected {SRC_TONE_HZ:.1f} Hz: "
-                     f"the stream was mis-paced or clocked at the wrong rate")
+        fails.append(f"tone is {tone:.1f} Hz, expected {src_tone:.1f} Hz for a "
+                     f"{play_rate} Hz stream: the SAI played it at the wrong "
+                     f"rate (a model that assumes 48 kHz plays 16 kHz 3x fast)")
 
     if fails:
         print(f"capture: {stats}")

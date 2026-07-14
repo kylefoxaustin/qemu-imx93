@@ -128,7 +128,7 @@ groups:
         tier: A
         evidence: "Real PCM playback ASSERTED on the captured samples: run.sh always captures to a wav (driver=wav opens a file, never a device - simultaneously the mute and the evidence) and check_wav.py requires peak == 8000, ~1s of signal, and a 436 Hz tone, so a datapath that scaled, truncated or mis-paced the stream fails. Mutation-verified: halving the amplitude and dropping half the samples each fail, and each is missed by the other's gate. TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM"
         tests: [imx93-sai-test, imx93-reset-test]
-        notes: "SAI access width pinned to 16-bit for eDMA S16 writes"
+        notes: "SAI access width pinned to 16-bit for eDMA S16 writes. KNOWN GAP: the SAI opens its audio backend at a hardcoded 48 kHz and does not follow the guest's rate - on this board it is a bit-clock SLAVE (TCR2.BCD_MSTR clear; the wm8962 drives BCLK/LRCLK), so the rate is set in the codec over I2C and is not derivable from any SAI register. A 16 kHz stream is therefore clocked out 3x too fast. Demonstrable: RATES='48000 16000' bash tests/audio-imx93/run.sh fails the 16 kHz case with the tone transposed 145 Hz -> 436 Hz. Closing it needs the wm8962 model (today a register store that never decodes its clocking) to derive its rate and hand it to the SAI"
       - block: "MICFIL (PDM mic) / XCVR"
         tier: B
         evidence: "Driver bring-up"
