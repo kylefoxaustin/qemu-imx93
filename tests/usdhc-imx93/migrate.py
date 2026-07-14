@@ -33,22 +33,39 @@ import tempfile
 import time
 
 QEMU = os.environ.get("QEMU", "build-imx93/qemu-system-aarch64")
-MACHINE = "imx93-11x11-evk"
 
+MACHINE = "imx93-11x11-evk"
 USDHC1 = 0x42850000
 VEND_SPEC = USDHC1 + 0xC0
 VEND_SPEC_RESET = 0x30007809
+
+#
+# The i.MX 8M Plus shares TYPE_IMX_USDHC but never sets vendor-spec-reset, so it
+# comes up on the property's default of 0 - and sdhci-esdhc-imx still writes the
+# register at runtime (FRC_SDCLK_ON). That is the case a predicate keyed on
+# "vendor_spec_reset != 0" gets wrong: it is false forever there, the subsection
+# is never emitted, and the guest's value dies at the migration boundary.
+#
+# A test that only ever runs the machine it was written for cannot see a bug
+# that lives in the default, so run the i.MX 8M Plus too. (-global cannot stand
+# in for it: a board that sets the property in realize overrides -global, and
+# the case would pass while testing nothing.)
+#
+MACHINE_DEFAULT = "imx8mp-evk"
+USDHC1_8MP = 0x30B40000
+VEND_SPEC_8MP = USDHC1_8MP + 0xC0
+VEND_SPEC_RESET_8MP = 0x00000000
 
 
 class Vm:
     """A qtest-driven QEMU with a QMP socket, for MMIO pokes + migration."""
 
-    def __init__(self, td, tag, incoming=None):
+    def __init__(self, td, tag, incoming=None, machine=MACHINE):
         self.td = td
         self.qmp_path = f"{td}/{tag}-qmp.sock"
         self.qt_path = f"{td}/{tag}-qt.sock"
         args = [
-            QEMU, "-machine", MACHINE, "-accel", "qtest", "-display", "none",
+            QEMU, "-machine", machine, "-accel", "qtest", "-display", "none",
             "-audio", "driver=none",
             "-qtest", f"unix:{self.qt_path},server=on,wait=off",
             "-qmp", f"unix:{self.qmp_path},server=on,wait=off",
@@ -114,27 +131,40 @@ class Vm:
             pass
 
 
-def round_trip(td, tag, write_val):
+def round_trip(td, tag, write_val, machine=MACHINE, addr=VEND_SPEC,
+               expect_reset=None):
     """Boot, optionally write VEND_SPEC, migrate to a file, reload, read back.
 
-    Returns (value_after_migration, state_file_size).
+    If expect_reset is given, assert the register really came up holding it
+    BEFORE writing anything: a case that does not verify its own setup is
+    testing something else, and would pass while proving nothing.
+
+    Returns (value_before, value_after, state_file_size).
     """
     state = f"{td}/{tag}.state"
-    src = Vm(td, f"{tag}-src")
+    src = Vm(td, f"{tag}-src", machine=machine)
     try:
+        if expect_reset is not None:
+            got = src.readl(addr)
+            if got != expect_reset:
+                raise RuntimeError(
+                    f"{tag}: setup check failed - {machine} came up with "
+                    f"VEND_SPEC=0x{got:08x}, expected the reset value "
+                    f"0x{expect_reset:08x}; this case is not exercising the "
+                    f"path it claims to")
         if write_val is not None:
-            src.writel(VEND_SPEC, write_val)
-        before = src.readl(VEND_SPEC)
+            src.writel(addr, write_val)
+        before = src.readl(addr)
         src.qmp_cmd({"execute": "migrate",
                      "arguments": {"uri": f"file:{state}"}})
         src.qmp_wait_migration("completed")
     finally:
         src.close()
 
-    dst = Vm(td, f"{tag}-dst", incoming=f"file:{state}")
+    dst = Vm(td, f"{tag}-dst", incoming=f"file:{state}", machine=machine)
     try:
         dst.qmp_wait_migration("completed")
-        after = dst.readl(VEND_SPEC)
+        after = dst.readl(addr)
     finally:
         dst.close()
 
@@ -194,6 +224,27 @@ def main():
             else:
                 print(f"ok   wire-format {tag}: +{delta} B over the untouched "
                       f"baseline (the subsection)")
+
+        #
+        # The default-reset machine. i.MX 8M Plus shares this device model and
+        # never sets vendor-spec-reset, so it comes up at 0 - yet its driver
+        # writes the register. A predicate keyed on "vendor_spec_reset != 0" is
+        # false forever here, never emits the subsection, and the guest's value
+        # dies at the migration boundary. The i.MX 93 cases above cannot see
+        # that: they only ever run a machine where the reset is non-zero.
+        #
+        before, after, _ = round_trip(
+            td, "imx8mp-frc", 0x00000100,
+            machine=MACHINE_DEFAULT, addr=VEND_SPEC_8MP,
+            expect_reset=VEND_SPEC_RESET_8MP)
+        ok = (before == 0x100) and (after == 0x100)
+        print(f"{'ok  ' if ok else 'FAIL'} imx8mp     "
+              f"0x{before:08x} -> 0x{after:08x}  (want 0x00000100)  "
+              f"[reset=0 machine: the default path]")
+        if not ok:
+            failures.append(
+                f"imx8mp (default reset=0): guest wrote 0x100, got back "
+                f"0x{after:08x} - the value died at the migration boundary")
 
     if failures:
         print("\nFAILED:")
