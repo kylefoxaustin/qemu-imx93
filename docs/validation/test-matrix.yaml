@@ -125,8 +125,8 @@ groups:
         tests: [imx93-isi-test]
       - block: "SAI3 + WM8962 codec"
         tier: A
-        evidence: "Real PCM playback + WAV capture (-audio driver=wav)"
-        tests: [imx93-sai-test]
+        evidence: "Real PCM playback + WAV capture (-audio driver=wav); TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM"
+        tests: [imx93-sai-test, imx93-reset-test]
         notes: "SAI access width pinned to 16-bit for eDMA S16 writes"
       - block: "MICFIL (PDM mic) / XCVR"
         tier: B
@@ -164,9 +164,9 @@ groups:
         tests: [imx93-flexspi-test]
       - block: "FlexCAN / CAN bus"
         tier: A
-        evidence: "Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93; qtest: RXIMR ID-match + overrun + disabled-controller gating (real CAN1->CAN2, mutation-verified)"
+        evidence: "Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93; qtest: RXIMR ID-match + overrun + disabled-controller gating (real CAN1->CAN2, mutation-verified). MCR reset value matches the RM (0x5980_040F: enabled+frozen, SUPV set, MAXMB=16) so the fsl_flexcan read-modify-write does not launder module-disable / wrong mailbox count"
         notes: "can-host-chardev bridges a can-bus to a chardev — no host vcan/SocketCAN needed"
-        tests: [flexcan-test, imx93-flexcan-test]
+        tests: [flexcan-test, imx93-flexcan-test, imx93-reset-test]
       - block: "GPIO / PMIC"
         tier: B
         evidence: "Poweroff, GPIO-idle-HIGH; PMIC over I2C"

@@ -58,7 +58,7 @@ _Status column source: real meson testlog._
 | Media Block Control | B | — | Display/camera muxing for the above |  |
 | PXP (G2D 2D engine) | A | PASS (1) | copy/fill/blit/blend/rotate byte-exact (qtest + e2e); Weston composites through PXP | scale + CSC not modelled — libg2d/pxp_dma_v3 stack limit, not a model gap |
 | ISI + MIPI-CSI + MT9M114 / OV5640 | A | PASS (1) | Real V4L2 frames to /dev/video0; v4l2-compliance 48/48 ioctl + 55/55 streaming |  |
-| SAI3 + WM8962 codec | A | PASS (1) | Real PCM playback + WAV capture (-audio driver=wav) | SAI access width pinned to 16-bit for eDMA S16 writes |
+| SAI3 + WM8962 codec | A | PASS (2) | Real PCM playback + WAV capture (-audio driver=wav); TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM | SAI access width pinned to 16-bit for eDMA S16 writes |
 | MICFIL (PDM mic) / XCVR | B | — | Driver bring-up |  |
 
 ## Accelerator (NPU)
@@ -76,7 +76,7 @@ _Status column source: real meson testlog._
 | LPUART x8 | A | — | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact (run-uart.sh) |  |
 | FlexIO | B | PASS (1) | qtest (I2C master) |  |
 | FlexSPI | B | PASS (1) | qtest (NOR bring-up) |  |
-| FlexCAN / CAN bus | A | PASS (2) | Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93; qtest: RXIMR ID-match + overrun + disabled-controller gating (real CAN1->CAN2, mutation-verified) | can-host-chardev bridges a can-bus to a chardev — no host vcan/SocketCAN needed |
+| FlexCAN / CAN bus | A | PASS (3) | Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93; qtest: RXIMR ID-match + overrun + disabled-controller gating (real CAN1->CAN2, mutation-verified). MCR reset value matches the RM (0x5980_040F: enabled+frozen, SUPV set, MAXMB=16) so the fsl_flexcan read-modify-write does not launder module-disable / wrong mailbox count | can-host-chardev bridges a can-bus to a chardev — no host vcan/SocketCAN needed |
 | GPIO / PMIC | B | — | Poweroff, GPIO-idle-HIGH; PMIC over I2C |  |
 | ADC | B | PASS (1) | Driver bring-up; SAR-ADC MCR/MSR reset values match the RM (0x3901/0x1) |  |
 | I3C1 (Silvaco) | B | — | I3C master bridges to legacy-I2C; wm8962-on-I3C audio card probes over it |  |
