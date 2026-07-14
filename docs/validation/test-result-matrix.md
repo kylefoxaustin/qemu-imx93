@@ -54,7 +54,7 @@ _Status column source: real meson testlog._
 
 | Block | Tier | Status | Evidence | Notes |
 |-------|------|--------|----------|-------|
-| LCDIFv3 -> MIPI-DSI -> ADV7535 -> HDMI | A | — | Pixels scanned out 1920x1080; modetest 7 formats + pageflip + SMPTE screendump | Login/typeable console; Weston desktop |
+| LCDIFv3 -> MIPI-DSI -> ADV7535 -> HDMI | A | PASS (1) | Pixels scanned out 1920x1080; modetest 7 formats + pageflip + SMPTE screendump. CTRL reset value matches the RM (0x8000_0000: SW_RESET held) - the block comes up in software reset like silicon; boot-verified the DSI connector still scans out | Login/typeable console; Weston desktop |
 | Media Block Control | B | — | Display/camera muxing for the above |  |
 | PXP (G2D 2D engine) | A | PASS (1) | copy/fill/blit/blend/rotate byte-exact (qtest + e2e); Weston composites through PXP | scale + CSC not modelled — libg2d/pxp_dma_v3 stack limit, not a model gap |
 | ISI + MIPI-CSI + MT9M114 / OV5640 | A | PASS (1) | Real V4L2 frames to /dev/video0; v4l2-compliance 48/48 ioctl + 55/55 streaming |  |

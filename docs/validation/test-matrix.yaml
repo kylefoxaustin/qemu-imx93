@@ -108,8 +108,9 @@ groups:
     rows:
       - block: "LCDIFv3 -> MIPI-DSI -> ADV7535 -> HDMI"
         tier: A
-        evidence: "Pixels scanned out 1920x1080; modetest 7 formats + pageflip + SMPTE screendump"
+        evidence: "Pixels scanned out 1920x1080; modetest 7 formats + pageflip + SMPTE screendump. CTRL reset value matches the RM (0x8000_0000: SW_RESET held) - the block comes up in software reset like silicon; boot-verified the DSI connector still scans out"
         notes: "Login/typeable console; Weston desktop"
+        tests: [imx93-reset-test]
       - block: "Media Block Control"
         tier: B
         evidence: "Display/camera muxing for the above"
