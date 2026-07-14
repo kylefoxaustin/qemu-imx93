@@ -37,7 +37,7 @@ need DTB    "$DTB"    "device tree"
 need WIC    "$WIC"    "core-image-weston .wic disk (use-g2d=false, 1G)"
 
 set -x
-exec "$QEMU" -M imx93-11x11-evk -m 4G -display "$DISPLAY_BACKEND" \
+exec "$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display "$DISPLAY_BACKEND" \
     -kernel "$KERNEL" -dtb "$DTB" \
     -drive if=sd,file="$WIC",format=raw \
     -append "console=ttyLP0,115200 root=/dev/mmcblk0p2 rootwait rw cpuidle.off=1" \

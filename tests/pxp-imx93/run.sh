@@ -90,7 +90,7 @@ ENV=()
 [ "$CAPTURE" = 1 ] && ENV=(env PXP_DBG=1)
 
 echo "==> booting (CAPTURE=$CAPTURE); watching for PXP-G2D-COPY result"
-"${ENV[@]}" "$QEMU" -M imx93-11x11-evk -m 4G \
+"${ENV[@]}" "$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G \
     -kernel "$KERNEL" -dtb "$DTB" \
     -drive if=sd,file="$IMG",format=raw -append "$APPEND" \
     -display none -serial "file:$LOG" -serial null 2>"$TRACE" &

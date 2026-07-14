@@ -52,7 +52,7 @@ with open(f"{TD}/c.cpio.gz", "wb") as cc:
 
 MON = f"{TD}/qmp.sock"
 qemu = subprocess.Popen([
-    QEMU, "-M", "imx93-11x11-evk", "-m", "4G", "-display", "none",
+    QEMU, "-M", "imx93-11x11-evk", "-m", "4G", "-display", "none", "-audio", "driver=none",
     "-kernel", KERNEL, "-dtb", DTB, "-initrd", f"{TD}/c.cpio.gz",
     "-append", "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel",
     "-serial", f"file:{CON}", "-serial", "null",

@@ -65,7 +65,7 @@ if [ -n "$INITRD" ]; then
 fi
 
 set -x
-exec "$QEMU" -M imx93-11x11-evk -m 2G -display none \
+exec "$QEMU" -M imx93-11x11-evk -audio driver=none -m 2G -display none \
     "${ICOUNT_ARGS[@]}" \
     -kernel "$KERNEL" -dtb "$DTB" "${INITRD_ARGS[@]}" \
     -append "$CMDLINE" \

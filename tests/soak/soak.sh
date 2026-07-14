@@ -51,7 +51,7 @@ cat "$BASE_INITRD" "$TMP/o.cpio" > "$TMP/c.cpio.gz"
 
 : > "$LOG"
 echo "soak: booting (duration=${DURATION}s, sample=${SAMPLE}s) -> $LOG"
-"$QEMU" -M imx93-11x11-evk -m 4G -display none \
+"$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
     -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/c.cpio.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
     -serial "file:$LOG" -serial null &

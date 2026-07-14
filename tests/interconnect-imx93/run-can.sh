@@ -94,7 +94,7 @@ RECV_IRD=$(build_initrd recv)
 SEND_IRD=$(build_initrd send)
 
 boot() {                    # $1=initrd  $2=chardev-args  $3=logfile
-    timeout --signal=KILL "$TMO" "$QEMU" -M imx93-11x11-evk -smp 3 -m "$MEM" -display none \
+    timeout --signal=KILL "$TMO" "$QEMU" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
         -kernel "$IMAGE" -dtb "$DTB2" -initrd "$1" \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/init" \
         -object can-bus,id=cb -machine canbus0=cb,canbus1=cb \

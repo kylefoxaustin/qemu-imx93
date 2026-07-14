@@ -103,7 +103,7 @@ MPID=$!
 i=0; while [ $i -lt 30 ]; do ss -xl 2>/dev/null | grep -qF "$SOCK" && break; sleep 0.5; i=$((i + 1)); done
 
 echo "== booting i.MX 93 client (Linux fsl-lpspi /dev/spidev, spi-link socket connect) =="
-timeout "$TMO" "$QEMU93" -M imx93-11x11-evk -smp 3 -m "$MEM" -display none \
+timeout "$TMO" "$QEMU93" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
     -kernel "$IMAGE" -dtb "$WORK/spi.dtb" -initrd "$WORK/peer.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/init" \
     -chardev "socket,id=spil,path=$SOCK,server=off,reconnect-ms=1000" \

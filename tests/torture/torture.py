@@ -51,7 +51,7 @@ for s in (SER, MON):
     except OSError: pass
 
 qemu = subprocess.Popen([
-    QEMU, "-M", "imx93-11x11-evk", "-m", "4G", "-display", "none",
+    QEMU, "-M", "imx93-11x11-evk", "-m", "4G", "-display", "none", "-audio", "driver=none",
     "-kernel", KERNEL, "-dtb", DTB,
     "-drive", f"if=sd,file={WIC},format=raw",
     "-append", "console=ttyLP0,115200 root=/dev/mmcblk0p2 rootwait rw cpuidle.off=1",

@@ -73,7 +73,7 @@ SRV_IRD=$(build_initrd server "$SUBNET.1" "$SUBNET.2")
 CLI_IRD=$(build_initrd client "$SUBNET.2" "$SUBNET.1")
 
 boot() {                    # $1=initrd  $2=nic-arg  $3=logfile
-    timeout "$TMO" "$QEMU" -M imx93-11x11-evk -smp 3 -m "$MEM" -display none \
+    timeout "$TMO" "$QEMU" -M imx93-11x11-evk -audio driver=none -smp 3 -m "$MEM" -display none \
         -kernel "$IMAGE" -dtb "$DTB" -initrd "$1" \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/init" \
         -nic "$2" -nic user \

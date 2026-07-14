@@ -67,7 +67,7 @@ STAGE="$OUT/rootfs" IMG="$IMG" ROOTFS="$ROOTFS" FEED="$FEED" PIPELINE="$PIPELINE
     fakeroot bash "$HERE/mkrootfs.sh" || { echo "error: rootfs build failed" >&2; exit 1; }
 
 APPEND="console=ttyLP0,115200 root=/dev/mmcblk0 rootwait rw cpuidle.off=1"
-QEMU_ARGS=( -M imx93-11x11-evk -m 4G
+QEMU_ARGS=( -M imx93-11x11-evk -audio driver=none -m 4G
     -kernel "$KERNEL" -dtb "$DTB"
     -drive if=sd,file="$IMG",format=raw
     -append "$APPEND" )

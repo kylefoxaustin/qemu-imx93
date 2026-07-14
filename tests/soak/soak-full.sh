@@ -227,7 +227,7 @@ run_phase() {  # run_phase <name> <dtb> <initrd> <dur> <extra-qemu-args...>
     local log="$OUT/$name.log"; : > "$log"
     echo
     echo "######## PHASE $name (dur=${dur}s, dtb=$(basename "$dtb")) ########"
-    "$QEMU" -M imx93-11x11-evk -m 4G -display none \
+    "$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
         -kernel "$KERNEL" -dtb "$dtb" -initrd "$initrd" "$@" \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel ip=dhcp" \
         -serial "file:$log" -serial null &

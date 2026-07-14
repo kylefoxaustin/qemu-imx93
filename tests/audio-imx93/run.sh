@@ -71,7 +71,7 @@ fi
     > overlay.cpio )
 cat "$BASE_INITRD" "$TMP/overlay.cpio" > "$TMP/combined.cpio.gz"
 
-AUDIO=()
+AUDIO=(-audio driver=none)  # muted by default; WAV= opts into capture
 [ -n "$WAV" ] && AUDIO=(-audio "driver=wav,path=$WAV")
 
 set -x

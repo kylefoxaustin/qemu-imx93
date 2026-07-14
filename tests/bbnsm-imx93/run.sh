@@ -49,7 +49,7 @@ chmod +x "$TMP/myinit"
 ( cd "$TMP" && find ./myinit | cpio -o -H newc 2>/dev/null > o.cpio )
 cat "$BASE_INITRD" "$TMP/o.cpio" > "$TMP/c.cpio.gz"
 
-exec "$QEMU" -M imx93-11x11-evk -m 4G -display none \
+exec "$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
     -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/c.cpio.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
     -serial mon:stdio -serial null

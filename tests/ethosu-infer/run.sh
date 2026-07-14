@@ -67,7 +67,7 @@ cat "$BASE_INITRD" "$TMP/o.cpio" > "$TMP/c.cpio.gz"
 M33CON=${M33CON:-/tmp/ethosu-infer-m33.log}
 echo "M33 console -> $M33CON ; full log -> $LOG"
 set -x
-"$QEMU" -M imx93-11x11-evk -m 4G -display none \
+"$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
     -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/c.cpio.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
     -serial mon:stdio -serial "file:$M33CON" 2>&1 | tee "$LOG"

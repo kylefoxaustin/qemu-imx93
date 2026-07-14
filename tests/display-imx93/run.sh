@@ -58,7 +58,7 @@ chmod +x "$TMP/ov/myinit"
 cat "$BASE_INITRD" "$TMP/o.cpio" > "$TMP/c.cpio.gz"
 
 echo "display: booting rm67199 DSI panel -> $TMP/shot.ppm"
-"$QEMU" -M imx93-11x11-evk -m 4G -display none \
+"$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
     -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/c.cpio.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
     -serial "file:$TMP/serial.log" -serial null \

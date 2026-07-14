@@ -73,7 +73,7 @@ chmod +x "$TMP/myinit"; install -m755 "$V4L2_CAP" "$TMP/v4l2_cap"
 cat "$BASE_INITRD" "$TMP/o.cpio" > "$TMP/c.cpio.gz"
 
 echo "csi-inject: booting ov5640 DTB, ISI frames=$TMP/frames"
-"$QEMU" -M imx93-11x11-evk -m 4G -display none \
+"$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
     -global driver=imx93.isi,property=frames,value="$TMP/frames" \
     -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/c.cpio.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \

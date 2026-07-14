@@ -102,7 +102,7 @@ chmod +x "$STAGE/init"
 ( cd "$STAGE" && find . | cpio -o -H newc 2>/dev/null | gzip ) > "$WORK/initrd.cpio.gz"
 
 # --- Boot + capture. ---------------------------------------------------------
-"$QEMU" -M imx93-11x11-evk -m 4G -display none \
+"$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
     -qmp "unix:$QMP,server=on,wait=off" \
     -kernel "$KERNEL" -dtb "$WORK/panel.dtb" -initrd "$WORK/initrd.cpio.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/init systemd.log_target=console systemd.journald.forward_to_console=1" \

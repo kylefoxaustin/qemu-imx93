@@ -41,7 +41,7 @@ install -m755 "$HERE/myinit" "$TMP/myinit"
 cat "$BASE_INITRD" "$TMP/overlay.cpio" > "$TMP/combined.cpio.gz"
 
 set -x
-exec "$QEMU" -M imx93-11x11-evk -m 4G -display none \
+exec "$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
     -device tmp105,bus=flexio1-i2c,address=0x49 \
     -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/combined.cpio.gz" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \

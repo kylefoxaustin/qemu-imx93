@@ -37,7 +37,7 @@ trap cleanup EXIT
 
 # Load at the A55 view of ITCM + 0x20000 (0x201E0000) - the M33 reset VTOR,
 # matching where NXP M33 firmware links its vector table.
-setsid "$QEMU" -M imx93-11x11-evk -m 4G -display none \
+setsid "$QEMU" -M imx93-11x11-evk -audio driver=none -m 4G -display none \
     -kernel "$KERNEL" -dtb "$DTB" -initrd "$BASE_INITRD" \
     -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/sbin/init ignore_loglevel" \
     -device loader,file="$FW",addr=0x201E0000 \
