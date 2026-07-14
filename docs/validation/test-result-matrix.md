@@ -47,7 +47,7 @@ _Status column source: real meson testlog._
 |-------|------|--------|----------|-------|
 | FEC (imx_fec) | A | — | Real traffic + DHCP; torture drives live FEC; board-to-board byte-exact (run-eth.sh) |  |
 | eQOS (dwmac) | A | — | Real traffic + DHCP |  |
-| uSDHC (SD/eMMC) | A | PASS (1) | Boots rootfs from SD; VEND_SPEC reset value matches the RM (0x3000_7809, soft clock enables on) via a qdev property so the sdhci-esdhc-imx read-modify-write does not launder the clock gates off - boot-verified all 3 controllers probe |  |
+| uSDHC (SD/eMMC) | A | PASS (1) | Boots rootfs from SD; VEND_SPEC reset value matches the RM (0x3000_7809, soft clock enables on) via a qdev property so the sdhci-esdhc-imx read-modify-write does not launder the clock gates off - boot-verified all 3 controllers probe. Migration: tests/usdhc-imx93/migrate.py asserts the value survives a real migrate (incl. a guest's deliberate zero) AND that the vmstate subsection is genuinely omitted when the field still holds its reset value (+160 B exactly when needed) - mutation-verified against both wrong predicates |  |
 | USB (Chipidea host) | A | — | Real USB devices enumerate in-guest; inter-QEMU usb-redir link byte-exact — vendor bulk-echo (64B) + CDC-ACM /dev/ttyACM0 round-trip vs MCX gadget, on imx93 + imx91 hosts | PORTSC.PSPD fix drives HS enumeration; mission #5 USB data path complete |
 
 ## Display / graphics / camera / audio

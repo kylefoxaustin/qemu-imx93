@@ -98,7 +98,7 @@ groups:
         evidence: "Real traffic + DHCP"
       - block: "uSDHC (SD/eMMC)"
         tier: A
-        evidence: "Boots rootfs from SD; VEND_SPEC reset value matches the RM (0x3000_7809, soft clock enables on) via a qdev property so the sdhci-esdhc-imx read-modify-write does not launder the clock gates off - boot-verified all 3 controllers probe"
+        evidence: "Boots rootfs from SD; VEND_SPEC reset value matches the RM (0x3000_7809, soft clock enables on) via a qdev property so the sdhci-esdhc-imx read-modify-write does not launder the clock gates off - boot-verified all 3 controllers probe. Migration: tests/usdhc-imx93/migrate.py asserts the value survives a real migrate (incl. a guest's deliberate zero) AND that the vmstate subsection is genuinely omitted when the field still holds its reset value (+160 B exactly when needed) - mutation-verified against both wrong predicates"
         tests: [imx93-reset-test]
       - block: "USB (Chipidea host)"
         tier: A
