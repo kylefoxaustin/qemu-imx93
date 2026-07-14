@@ -80,9 +80,9 @@ groups:
         notes: "The defining i.MX93-vs-95 difference — modelled, not SCMI-stubbed"
       - block: "OCOTP / ELE / BBNSM / SEMA42"
         tier: B
-        evidence: "Driver probe + mailbox / register transactions; ELE returns real host entropy for GET_RANDOM and honest-faults other crypto to the guest (qtest)"
+        evidence: "Driver probe + mailbox / register transactions; ELE returns real host entropy for GET_RANDOM and honest-faults other crypto to the guest (qtest). BBNSM_CTRL reset value matches the RM (0x0100_0005: RTC_EN/TA_EN two-bit-safety encoded to 01=disabled, not the impossible 00) so the driver's read-modify-write does not launder an illegal field - boot-verified rtc0 registers and reads a valid time"
         notes: "EdgeLock Enclave mailbox functional; uncomputed crypto fails closed to the guest by default"
-        tests: [imx93-ele-test]
+        tests: [imx93-ele-test, imx93-reset-test]
       - block: "SYSCTR / TSTMR / TPM / WDOG / TMU"
         tier: B
         evidence: "Timers/thermal/watchdog driver bring-up; WDOG CS/TOVAL reset values match the RM (0x2900/0x400) and coexist with the UNLOCK/enable/re-lock handshake"
