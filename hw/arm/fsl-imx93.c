@@ -685,6 +685,9 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
         for (i = 0; i < FSL_IMX93_NUM_USDHCS; i++) {
             SysBusDevice *sbd = SYS_BUS_DEVICE(&s->usdhc[i]);
 
+            /* VEND_SPEC resets to 0x3000_7809 on i.MX 9 (soft clock enables on). */
+            object_property_set_uint(OBJECT(&s->usdhc[i]), "vendor-spec-reset",
+                                     0x30007809, &error_abort);
             if (!sysbus_realize(sbd, errp)) {
                 return;
             }

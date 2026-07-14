@@ -75,7 +75,7 @@ struct SDHCIState {
     uint16_t acmd12errsts; /* Auto CMD12 error status register */
     uint16_t hostctl2;     /* Host Control 2 */
     uint64_t admasysaddr;  /* ADMA System Address Register */
-    uint16_t vendor_spec;  /* Vendor specific register */
+    uint32_t vendor_spec;  /* Vendor specific register (i.MX VEND_SPEC, 32-bit) */
 
     /* Read-only registers */
     uint64_t capareg;      /* Capabilities Register */
@@ -94,6 +94,7 @@ struct SDHCIState {
     /* RO Host Controller Version Register always reads as 0x2401 */
 
     /* Configurable properties */
+    uint32_t vendor_spec_reset; /* i.MX VEND_SPEC reset value (0 => generic) */
     bool pending_insert_quirk; /* Quirk for Raspberry Pi card insert int */
     uint32_t quirks;
     uint8_t sd_spec_version;

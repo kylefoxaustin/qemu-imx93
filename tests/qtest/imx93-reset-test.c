@@ -24,6 +24,8 @@
 #define LCDIF1  0x4ae30000
 #define FLEXCAN1 0x443a0000
 #define SAI1    0x443b0000
+#define USDHC1  0x42850000
+#define USDHC_VEND_SPEC 0xc0
 
 /* SAI TCSR + flag bits. */
 #define SAI_TCSR    0x08
@@ -156,6 +158,20 @@ static void test_sai_disabled_flags(void)
     qtest_quit(qts);
 }
 
+static void test_usdhc_vend_spec_reset(void)
+{
+    QTestState *qts = qtest_init("-machine imx93-11x11-evk -accel qtest");
+
+    /*
+     * RM uSDHC VEND_SPEC reset = 0x3000_7809 (soft clock enables on). The
+     * sdhci-esdhc-imx driver read-modify-writes this register, so a zero reset
+     * would launder the clock-enable bits off - works in QEMU, fails on silicon.
+     */
+    g_assert_cmphex(qtest_readl(qts, USDHC1 + USDHC_VEND_SPEC), ==, 0x30007809);
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -165,5 +181,6 @@ int main(int argc, char **argv)
     qtest_add_func("/imx93/reset/lcdif", test_lcdif_reset);
     qtest_add_func("/imx93/reset/flexcan", test_flexcan_reset);
     qtest_add_func("/imx93/reset/sai-disabled-flags", test_sai_disabled_flags);
+    qtest_add_func("/imx93/reset/usdhc-vend-spec", test_usdhc_vend_spec_reset);
     return g_test_run();
 }

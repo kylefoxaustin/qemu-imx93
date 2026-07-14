@@ -312,6 +312,15 @@ static void sdhci_reset(SDHCIState *s)
         s->norintstsen = 0x013f;
         s->errintstsen = 0x117f;
     }
+    /*
+     * VEND_SPEC (i.MX) is a 32-bit vendor register that resets non-zero on
+     * silicon (i.MX 9: 0x3000_7809 - soft clock enables on). The generic and
+     * eSDHC paths never expose it, so vendor_spec_reset defaults to 0 and they
+     * are unchanged; a platform that sets the property gets the RM value. The
+     * driver read-modify-writes VEND_SPEC, so a zero reset would launder the
+     * clock-enable bits off - works in QEMU, fails on hardware.
+     */
+    s->vendor_spec = s->vendor_spec_reset;
 }
 
 static void sdhci_poweron_reset(DeviceState *dev)
@@ -1509,6 +1518,30 @@ static bool sdhci_pending_insert_vmstate_needed(void *opaque)
     return s->pending_insert_state;
 }
 
+/*
+ * VEND_SPEC is only live on i.MX (vendor_spec_reset != 0). Migrate it as an
+ * opt-in subsection so generic/eSDHC snapshots keep their exact wire format;
+ * the driver read-modify-writes VEND_SPEC, so a lost value desyncs the soft
+ * clock-gate bits it carries from PRNSTS across a snapshot.
+ */
+static bool sdhci_vendor_spec_vmstate_needed(void *opaque)
+{
+    SDHCIState *s = opaque;
+
+    return s->vendor_spec_reset != 0;
+}
+
+static const VMStateDescription sdhci_vendor_spec_vmstate = {
+    .name = "sdhci/vendor-spec",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = sdhci_vendor_spec_vmstate_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(vendor_spec, SDHCIState),
+        VMSTATE_END_OF_LIST()
+    },
+};
+
 static const VMStateDescription sdhci_pending_insert_vmstate = {
     .name = "sdhci/pending-insert",
     .version_id = 1,
@@ -1557,6 +1590,7 @@ const VMStateDescription sdhci_vmstate = {
     },
     .subsections = (const VMStateDescription * const []) {
         &sdhci_pending_insert_vmstate,
+        &sdhci_vendor_spec_vmstate,
         NULL
     },
 };
@@ -1580,6 +1614,7 @@ static const Property sdhci_sysbus_properties[] = {
                      dma_mr, TYPE_MEMORY_REGION, MemoryRegion *),
     DEFINE_PROP_BOOL("wp-inverted", SDHCIState,
                      wp_inverted, false),
+    DEFINE_PROP_UINT32("vendor-spec-reset", SDHCIState, vendor_spec_reset, 0),
 };
 
 static void sdhci_sysbus_init(Object *obj)
