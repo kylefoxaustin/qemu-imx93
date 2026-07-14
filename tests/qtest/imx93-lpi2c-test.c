@@ -9,7 +9,7 @@
  * five (LPI2C3-7) used to be logging stubs. They are now real controllers so a
  * non-EVK board/DTB can host I2C peripherals on them. This test confirms all
  * eight respond as real hardware - PARAM reads back the FIFO-size identity
- * (0x0404, vs 0 from an unimplemented stub) and MCR latches the enable bit -
+ * (0x0303, vs 0 from an unimplemented stub) and MCR latches the enable bit -
  * which a write-discarding stub region cannot do.
  */
 
@@ -20,7 +20,12 @@
 #define LPI2C_MCR       0x10
 #define MCR_MEN         (1u << 0)
 
-#define PARAM_VALUE     0x0404
+/*
+ * PARAM reset per the RM: TX/RX FIFOs are 2^3 = 8 deep. This test previously
+ * pinned 0x0404 (2^4 = 16) - twice the real depth - which the driver would have
+ * used to size its watermark and read chunking.
+ */
+#define PARAM_VALUE     0x0303
 
 static const struct {
     const char *name;

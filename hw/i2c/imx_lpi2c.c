@@ -23,6 +23,24 @@
 
 #define LPI2C_PARAM     0x04
 #define LPI2C_MCR       0x10
+
+/*
+ * PARAM per the i.MX 93 RM: 0x0000_0303 - the TX and RX FIFOs are 2^3 = 8 deep.
+ * i2c-imx-lpi2c derives its watermark (MFCR = txfifosize >> 1) and its read
+ * chunking (rxfifosize >> 1) from this field, so over-reporting the depth sizes
+ * the driver for a FIFO the silicon does not have: it works here, and mis-sizes
+ * on hardware. We previously reported 0x0404 (16), twice the real depth.
+ *
+ * On a capability register, under-reporting is the safe error direction: this
+ * model's TX never fills and its RX holds IMX_LPI2C_RXFIFO_SIZE, both at least
+ * the depth we advertise, so we never promise more than we deliver. The build
+ * assertion below keeps that true if either number is ever changed.
+ */
+#define LPI2C_PARAM_VALUE   0x00000303u
+#define LPI2C_FIFO_ADVERTISED   8       /* 2^3, as encoded in PARAM above */
+
+/* Never advertise a FIFO deeper than the one this model actually provides. */
+QEMU_BUILD_BUG_ON(IMX_LPI2C_RXFIFO_SIZE < LPI2C_FIFO_ADVERTISED);
 #define LPI2C_MSR       0x14
 #define LPI2C_MIER      0x18
 #define LPI2C_MCFGR0    0x20
@@ -149,7 +167,7 @@ static uint64_t imx_lpi2c_read(void *opaque, hwaddr offset, unsigned size)
 
     switch (offset) {
     case LPI2C_PARAM:
-        return 0x0404;                 /* tx/rx FIFO size = 2^4 each */
+        return LPI2C_PARAM_VALUE;      /* tx/rx FIFO size = 2^3 = 8 each (RM) */
     case LPI2C_MCR:
         return s->mcr;
     case LPI2C_MSR:

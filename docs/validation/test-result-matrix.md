@@ -71,7 +71,7 @@ _Status column source: real meson testlog._
 
 | Block | Tier | Status | Evidence | Notes |
 |-------|------|--------|----------|-------|
-| LPI2C x8 | A | PASS (1) | qtest; -device bus=lpi2cN attachable; board-to-board byte-exact via i2c-link (run-i2c.sh) |  |
+| LPI2C x8 | A | PASS (1) | qtest; -device bus=lpi2cN attachable; board-to-board byte-exact via i2c-link (run-i2c.sh). PARAM reports the RM FIFO depth (0x0303 = 2^3 = 8, not the 0x0404 = 16 we used to over-report) - i2c-imx-lpi2c sizes its watermark and read chunking from it, so over-reporting mis-sizes the driver on silicon; a build assertion keeps the advertised depth <= what the model delivers. Boot-verified: adv7511 probes over the corrected bus |  |
 | LPSPI x8 | A | PASS (1) | qtest; board-to-board byte-exact via spi-link (run-spi.sh); cross-SoC 93<->MCX / 93<->95 / 91<->93 | PARAM.PCSNUM + per-frame FCF fixes let the real fsl-lpspi bind + move data |
 | LPUART x8 | A | — | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact (run-uart.sh) |  |
 | FlexIO | B | PASS (1) | qtest (I2C master) |  |

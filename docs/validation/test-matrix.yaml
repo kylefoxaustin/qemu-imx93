@@ -145,7 +145,7 @@ groups:
     rows:
       - block: "LPI2C x8"
         tier: A
-        evidence: "qtest; -device bus=lpi2cN attachable; board-to-board byte-exact via i2c-link (run-i2c.sh)"
+        evidence: "qtest; -device bus=lpi2cN attachable; board-to-board byte-exact via i2c-link (run-i2c.sh). PARAM reports the RM FIFO depth (0x0303 = 2^3 = 8, not the 0x0404 = 16 we used to over-report) - i2c-imx-lpi2c sizes its watermark and read chunking from it, so over-reporting mis-sizes the driver on silicon; a build assertion keeps the advertised depth <= what the model delivers. Boot-verified: adv7511 probes over the corrected bus"
         tests: [imx93-lpi2c-test]
       - block: "LPSPI x8"
         tier: A
