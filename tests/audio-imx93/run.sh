@@ -74,22 +74,20 @@ fi
 # mandatory means the safe path is no longer the one you have to remember: the
 # test cannot render a verdict without it.
 #
-# RATES selects the playback rate(s). The rate is an argument rather than a
-# constant because a model that assumes one rate is invisible to a test that
-# only ever asks for that rate - see the KNOWN GAP below.
+# It runs at MORE THAN ONE RATE, and that is not decoration.
 #
-#   RATES="48000 16000" bash run.sh
+# On this board the SAI is a bit-clock SLAVE (TCR2.BCD_MSTR is clear - the WM8962
+# drives BCLK/LRCLK), so the frame rate lives in the CODEC, programmed over I2C,
+# and is not derivable from any SAI register: they are byte-identical at 48 kHz
+# and 16 kHz. The codec decodes it and drives it to the SAI over the "rate" wire.
 #
-# demonstrates it: on this board the SAI is a bit-clock SLAVE (TCR2.BCD_MSTR is
-# clear - the wm8962 codec drives BCLK/LRCLK), so the frame rate is set in the
-# CODEC over I2C and is not derivable from any SAI register. Our SAI opens its
-# audio backend at a hardcoded 48 kHz, so a 16 kHz stream is clocked out three
-# times too fast: the capture comes back a third of a second long with the tone
-# transposed from 145 Hz up to 436 Hz. Closing it needs the wm8962 model - today
-# a register store that never decodes its clocking - to derive its rate and hand
-# it to the SAI. Declared, demonstrable, and not silent.
+# A model that assumed 48 kHz played a 16 kHz stream three times too fast - and
+# the only test that existed asked for 48 kHz, which is the one rate that cannot
+# see the assumption. Asking a second question is what caught it, and is what
+# keeps it caught: cut the codec->SAI rate wire and the 16 kHz case goes red with
+# its tone transposed from 145 Hz back up to 436 Hz.
 #
-RATES=${RATES:-48000}
+RATES=${RATES:-"48000 16000"}
 LOG=$TMP/console.log
 WAVDIR=${WAVDIR:-$TMP}
 

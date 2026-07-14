@@ -70,6 +70,16 @@ struct IMX93SaiState {
     AudioBackend *audio_be;
     SWVoiceOut *voice;
     bool      voice_active;
+
+    /*
+     * The frame rate, received from the codec on the "codec-rate" input. The
+     * SAI is a bit-clock SLAVE on this board (TCR2.BCD_MSTR clear): the WM8962
+     * drives BCLK/LRCLK and its rate is programmed over I2C, so the number is
+     * not present in this device and cannot be computed from its registers -
+     * they are identical at 48 kHz and 16 kHz. We do not derive it, we receive
+     * it. 0 until the codec says otherwise.
+     */
+    uint32_t  rate;
     uint8_t   cap[IMX93_SAI_CAP_SIZE];   /* played PCM awaiting the backend */
     uint32_t  cap_head;
     uint32_t  cap_count;

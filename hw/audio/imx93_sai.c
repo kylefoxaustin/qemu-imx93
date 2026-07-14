@@ -78,8 +78,20 @@
  */
 #define SAI_PARAM_VALUE 0x00050704
 
-/* One word of a 48 kHz stereo stream: 96000 words/s. */
-#define SAI_TX_WORD_NS  (NANOSECONDS_PER_SECOND / 96000)
+/*
+ * One word period. The SAI clocks out one word per (rate x words-per-frame),
+ * so this follows the rate the CODEC reports - it used to be the constant
+ * NANOSECONDS_PER_SECOND / 96000 (48 kHz stereo, forever, whatever the guest
+ * actually asked for), which drained a 16 kHz stream three times too fast.
+ */
+#define SAI_DEFAULT_RATE 48000
+
+static inline int64_t imx93_sai_word_ns(const IMX93SaiState *s)
+{
+    uint32_t rate = s->rate ? s->rate : SAI_DEFAULT_RATE;
+
+    return NANOSECONDS_PER_SECOND / ((int64_t)rate * 2);
+}
 
 static void imx93_sai_tx_update_flags(IMX93SaiState *s)
 {
@@ -156,7 +168,7 @@ static void imx93_sai_tx_tick(void *opaque)
     imx93_sai_update_irq(s);
 
     timer_mod(s->tx_timer,
-              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + SAI_TX_WORD_NS);
+              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + imx93_sai_word_ns(s));
 }
 
 static void imx93_sai_tx_push(IMX93SaiState *s, uint32_t word)
@@ -273,7 +285,7 @@ static void imx93_sai_rx_tick(void *opaque)
     }
 
     timer_mod(s->rx_timer,
-              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + SAI_TX_WORD_NS);
+              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + imx93_sai_word_ns(s));
 }
 
 /* Queue the exact bytes the DMA wrote to TDR0 for the audio backend. */
@@ -314,6 +326,47 @@ static void imx93_sai_voice_set(IMX93SaiState *s, bool on)
     if (s->voice && on != s->voice_active) {
         audio_be_set_active_out(s->audio_be, s->voice, on);
         s->voice_active = on;
+    }
+}
+
+/*
+ * The codec tells us the rate it is clocking at.
+ *
+ * On this board the SAI is a bit-clock SLAVE (TCR2.BCD_MSTR is clear): the
+ * WM8962 drives BCLK and LRCLK, and its rate is programmed over I2C. The rate
+ * is therefore NOT PRESENT IN THIS DEVICE - the SAI's own divider registers are
+ * byte-identical at 48 kHz and 16 kHz - so we do not compute it, we RECEIVE it,
+ * on the same wire the hardware uses. A formula over TCR2/TCR4 would be correct
+ * for a bit-clock master, would agree with itself at 48 kHz, and would be a
+ * fabrication with a reference-manual citation attached.
+ *
+ * Re-open the backend voice so the captured stream carries the true rate: a
+ * 16 kHz stream written into a 48 kHz voice plays three times too fast, which
+ * is exactly the bug this exists to kill.
+ */
+static void imx93_sai_codec_rate(void *opaque, int n, int level)
+{
+    IMX93SaiState *s = opaque;
+    uint32_t rate = (uint32_t)level;
+
+    if (!rate || rate == s->rate) {
+        return;
+    }
+    s->rate = rate;
+
+    if (s->audio_be) {
+        struct audsettings as = {
+            .freq = rate,
+            .nchannels = 2,
+            .fmt = AUDIO_FORMAT_S16,
+            .big_endian = false,
+        };
+        bool was_active = s->voice_active;
+
+        s->voice = audio_be_open_out(s->audio_be, s->voice, "imx93-sai-tx", s,
+                                     imx93_sai_audio_cb, &as);
+        s->voice_active = false;
+        imx93_sai_voice_set(s, was_active);
     }
 }
 
@@ -378,7 +431,7 @@ static void imx93_sai_write(void *opaque, hwaddr offset, uint64_t value,
             imx93_sai_tx_update_flags(s);
             imx93_sai_voice_set(s, true);
             timer_mod(s->tx_timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + SAI_TX_WORD_NS);
+                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + imx93_sai_word_ns(s));
         } else if (!(v & TCSR_TE) && (old & TCSR_TE)) {
             timer_del(s->tx_timer);
             imx93_sai_voice_set(s, false);
@@ -406,7 +459,7 @@ static void imx93_sai_write(void *opaque, hwaddr offset, uint64_t value,
             /* Receiver enabled: start filling the FIFO with samples. */
             imx93_sai_rx_update_flags(s);
             timer_mod(s->rx_timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + SAI_TX_WORD_NS);
+                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + imx93_sai_word_ns(s));
         } else if (!(v & RCSR_RE) && (old & RCSR_RE)) {
             timer_del(s->rx_timer);
         }
@@ -464,6 +517,7 @@ static void imx93_sai_realize(DeviceState *dev, Error **errp)
                           TYPE_IMX93_SAI, IMX93_SAI_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
     sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq);
+    qdev_init_gpio_in_named(dev, imx93_sai_codec_rate, "codec-rate", 1);
     qdev_init_gpio_out_named(dev, &s->dma_req_tx, "dma-req-tx", 1);
     qdev_init_gpio_out_named(dev, &s->dma_req_rx, "dma-req-rx", 1);
     s->tx_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, imx93_sai_tx_tick, s);

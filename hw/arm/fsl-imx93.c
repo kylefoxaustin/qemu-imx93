@@ -345,6 +345,8 @@ static void fsl_imx93_machine_done(Notifier *notifier, void *data)
 
 static void fsl_imx93_realize(DeviceState *dev, Error **errp)
 {
+    /* The WM8962 is created with LPI2C1, but wired to SAI3 after SAI realize. */
+    DeviceState *wm8962 = NULL;
     MachineState *ms = MACHINE(qdev_get_machine());
     FslImx93State *s = FSL_IMX93(dev);
     DeviceState *gicdev = DEVICE(&s->gic);
@@ -945,9 +947,9 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
                                     &error_abort);
 
         /* WM8962 audio codec @ 0x1a (the SAI3 speaker/headphone/mic card). */
-        i2c_slave_realize_and_unref(
-            i2c_slave_new(TYPE_WM8962, FSL_IMX93_WM8962_ADDR),
-            s->lpi2c1.bus, &error_abort);
+        wm8962 = DEVICE(i2c_slave_new(TYPE_WM8962, FSL_IMX93_WM8962_ADDR));
+        i2c_slave_realize_and_unref(I2C_SLAVE(wm8962), s->lpi2c1.bus,
+                                    &error_abort);
     }
 
     /*
@@ -1155,6 +1157,20 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
          * each advances its own cyclic channel - letting SAI3 playback, SAI3
          * capture and the XCVR (below) all run on eDMA2 at once.
          */
+        /*
+         * The codec is the bit-clock MASTER: it drives BCLK/LRCLK, and the rate
+         * the driver programs into it over I2C is the only copy of that number
+         * in the machine. SAI3 is the slave and cannot derive the rate from its
+         * own registers - they are byte-identical at 48 kHz and 16 kHz - so the
+         * board wires it across, and so do we. Connected here rather than at the
+         * codec's creation because the SAI's "codec-rate" input does not exist
+         * until it has been realized.
+         */
+        if (wm8962) {
+            qdev_connect_gpio_out_named(wm8962, "rate", 0,
+                qdev_get_gpio_in_named(DEVICE(&s->sai[2]), "codec-rate", 0));
+        }
+
         qdev_connect_gpio_out_named(DEVICE(&s->sai[2]), "dma-req-tx", 0,
             qdev_get_gpio_in_named(DEVICE(&s->edma2), "dma-req", 0x3c));
         qdev_connect_gpio_out_named(DEVICE(&s->sai[2]), "dma-req-rx", 0,

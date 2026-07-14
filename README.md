@@ -107,7 +107,7 @@ failure).
 | Storage — uSDHC | A | SDHCI ADMA; ext4 mmcblk0 r/w/sync from -drive if=sd |
 | Display — LCDIFv3 → DSI → ADV7535 → HDMI (+ LVDS) | A | 1920x1080 /dev/fb0, framebuffer scanned out + screendump byte-correct; fbcon login |
 | Camera — MT9M114/OV5640 → CSI → ISI → V4L2 | A | 5/5 byte-checked frames off /dev/video0 (parallel + MIPI-CSI2); host-image virtual camera |
-| Audio — SAI3/WM8962 play + capture | A | Real PCM via cyclic eDMA2; -audio driver=wav captures the played square wave and the test asserts its values - peak, a full second of signal, and the 436 Hz tone (QEMU's mixer resamples the capture, so the signal is checked, not the bytes); concurrent streams. Playback rate is fixed at 48 kHz - see Known limitations |
+| Audio — SAI3/WM8962 play + capture | A | Real PCM via cyclic eDMA2; -audio driver=wav captures the played square wave and the test asserts its values - peak, a full second of signal, and the tone - at TWO rates (48 kHz and 16 kHz), because a model that assumes one rate is invisible to a test that only asks for that rate. The WM8962 decodes its clocking and drives the rate to the SAI, which is the bit-clock slave; cut that wire and the 16 kHz case goes red. Concurrent streams |
 | PXP 2D (G2D) | A | copy/fill/blit/src-over-blend/rotate byte-exact (libg2d -> /dev/pxp_device -> model); use-g2d=true Weston composites through it |
 | LPUART ×8 | A | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact |
 | LPSPI ×8 | A | Per-bus SSI master; is25lp064 JEDEC byte-exact; drives board-to-board SPI (spi-link) |
@@ -229,11 +229,13 @@ suite — they are why the gates above are worded the way they are:
 - **A test that only ever asks one question cannot see an assumption it shares.**
   The audio oracle asserted amplitude, duration and tone — and was blind to sample
   *rate*, because it only ever played 48 kHz, which is exactly what the SAI
-  assumes (see Known limitations). Only a second operating point exposed it — and
-  exposed, in the same run, that the "obvious" fix (deriving the rate from the
-  SAI's own divider registers) is a correct-looking formula that computes the
-  wrong number on this board. It was **not** shipped; the gap is declared and
-  demonstrable instead.
+  assumed. A 16 kHz stream was clocked out three times too fast, and no test could
+  see it. The second operating point also killed the *obvious* fix: deriving the
+  rate from the SAI's own divider registers is the correct RM formula, agrees with
+  itself at 48 kHz, and computes the **wrong number** here — the SAI is a
+  bit-clock **slave**, so the rate is not in that device at all. The codec now
+  decodes its clocking and drives the rate to the SAI over a wire, as the board
+  does. `tests/audio-imx93/run.sh` plays **both** rates by default.
 Fidelity judgments (the NPU honest-fault
 discipline, the PXP scale/CSC boundary) live in
 [`docs/validation/fidelity-audit.md`](docs/validation/fidelity-audit.md). The
@@ -332,17 +334,6 @@ initramfs and interconnect oracles.
   status`) instead of being handed a fabricated success. Boot is unaffected.
   `-global driver=imx93.ele,property=fake-uncomputed-success,value=on` restores
   the old blanket-success behaviour for debugging.
-- **Audio playback is fixed at 48 kHz.** The SAI opens its audio backend at a
-  hardcoded 48 kHz and does not follow the rate the guest asked for, so a 16 kHz
-  stream is clocked out three times too fast. The rate is not recoverable from
-  the SAI: on this board it is a **bit-clock slave** (`TCR2.BCD_MSTR` is clear —
-  the WM8962 drives BCLK/LRCLK), so the rate is set in the *codec* over I²C, and
-  the codec model is a register store that does not yet decode its clocking.
-  48 kHz — what the EVK's ALSA stack uses by default — is verified end to end on
-  the captured samples. Demonstrate the gap with
-  `RATES="48000 16000" tests/audio-imx93/run.sh` (the 16 kHz case fails, with the
-  tone transposed from 145 Hz up to 436 Hz). Closing it means teaching
-  `hw/audio/wm8962.c` to derive its configured rate and hand it to the SAI.
 - **First-boot time is dominated by initramfs decompression under TCG** — a
   ~430 MB rootfs unpacks to ~1.3 GB tmpfs (~12 s here). Not a hang; a small
   busybox initramfs boots far faster.
