@@ -98,7 +98,8 @@ groups:
         evidence: "Real traffic + DHCP"
       - block: "uSDHC (SD/eMMC)"
         tier: A
-        evidence: "Boots rootfs from SD"
+        evidence: "Boots rootfs from SD; VEND_SPEC reset value matches the RM (0x3000_7809, soft clock enables on) via a qdev property so the sdhci-esdhc-imx read-modify-write does not launder the clock gates off - boot-verified all 3 controllers probe"
+        tests: [imx93-reset-test]
       - block: "USB (Chipidea host)"
         tier: A
         evidence: "Real USB devices enumerate in-guest; inter-QEMU usb-redir link byte-exact — vendor bulk-echo (64B) + CDC-ACM /dev/ttyACM0 round-trip vs MCX gadget, on imx93 + imx91 hosts"
