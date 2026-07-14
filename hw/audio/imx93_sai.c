@@ -69,10 +69,22 @@
 #define R(s, off)       ((s)->regs[(off) / 4])
 
 /*
- * VERID: major 3, minor 3, feature 0. A zero feature word keeps the timestamp
- * (TSTMP_EN) path out of the driver's probe, which is all we need here.
+ * VERID: 0x0302_0000 - major 3, minor 2, as the RM reports (0x0302_0002).
+ *
+ * The FEATURE word is deliberately 0 where silicon says 2, and that is a
+ * decision, not an accident: bit 1 is TSTMP_EN, and fsl_sai gates real code on
+ * it (fsl_sai.c:1586/1636/1656). We do not model the timestamp engine, so we
+ * must not advertise it - on a capability register, UNDER-reporting is the only
+ * direction that is safe in both worlds. A guest sized against no-TSTMP works
+ * here and on the board; one told we have it would drive an engine that is not
+ * there.
+ *
+ * The MINOR version, though, we used to over-report: 3 where silicon says 2.
+ * That is the unsafe direction - a revision the chip does not have - and it was
+ * getting away with it by luck: fsl_sai keys support_1_1_ratio off
+ * (version >= 0x0301), which 0x0302 satisfies anyway. Report the real one.
  */
-#define SAI_VERID_VALUE 0x03030000
+#define SAI_VERID_VALUE 0x03020000
 /*
  * PARAM: SPF (max slots/frame) = 5 -> 32 slots, WPF (FIFO depth) = 7 -> 128
  * words, DLN (datalines) = 4. Matches the imx93 soc_data the driver assumes.

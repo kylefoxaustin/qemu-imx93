@@ -33,12 +33,42 @@
 #define MICFIL_FIFO_CTRL_FIFOWMK 0x1f       /* Watermark (bits 4:0)         */
 
 /* VERID: major 1, minor 0, feature 0. */
-#define MICFIL_VERID_VALUE  0x01000000
+#define MICFIL_VERID_VALUE  0x020F0000
 /*
- * PARAM: FIFO_PTRWID = 3 (FIFO depth 8) and NPAIR = 4 (eight mic inputs). No
- * HWVAD reported, which keeps the voice-activity-detect path out of probe.
+ * PARAM: 0x0000_0154 - the RM's value (0x010B_0154) with the HWVAD capability
+ * masked out.
+ *
+ * The structure is silicon's: NPAIR = 4 (eight mic inputs) and FIFO_PTRWID = 5,
+ * i.e. a 32-deep FIFO - which is also what the driver's own imx93 soc_data
+ * assumes (fifo_depth = 32). We used to advertise a FIFO_PTRWID of 3, an
+ * 8-deep FIFO, which was a number nobody had: the RM says 32, the driver says
+ * 32, and the array in this model holds 64. Three different answers for the
+ * depth of one FIFO.
+ *
+ * HWVAD (the voice-activity detector, its zero-crossing and energy modes, and
+ * the unit count) is cleared because we do not model it. That is a decision -
+ * under-reporting a capability is safe in both worlds - not a lever to keep
+ * Linux out of a code path. As it happens the driver parses PARAM into a struct
+ * and never reads it back, so this buys nothing either way; that is a reason to
+ * tell the truth about it, not a reason to invent one.
  */
-#define MICFIL_PARAM_VALUE  0x00000034
+#define MICFIL_PARAM_VALUE  0x00000154
+
+/*
+ * Never advertise a FIFO deeper than the array we store into. Both sides are
+ * read from the thing they describe: the depth is DECODED FROM PARAM the way
+ * the guest decodes it, and compared against the real array. A hand-written
+ * constant beside PARAM would be two spellings of one belief, and would not
+ * fire for the drift that matters - PARAM changing without the array.
+ *
+ * The test is >, not !=: the model may hold MORE than it advertises (it holds
+ * 64 against silicon's 32). Over-delivering is safe in both worlds.
+ */
+#define MICFIL_PARAM_FIFO_PTRWID  (((MICFIL_PARAM_VALUE) >> 4) & 0xf)
+#define MICFIL_ADVERTISED_DEPTH   (1u << MICFIL_PARAM_FIFO_PTRWID)
+
+QEMU_BUILD_BUG_ON(MICFIL_ADVERTISED_DEPTH >
+                  ARRAY_SIZE(((IMX93MicfilState *)0)->rx_fifo));
 
 /* MICFIL outputs ~48 kHz; one decimated sample per word period. */
 #define MICFIL_WORD_NS  (1000000000LL / 48000)

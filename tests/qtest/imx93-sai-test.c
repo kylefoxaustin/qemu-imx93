@@ -61,8 +61,27 @@ static void test_tx_fifo(void)
     uint32_t tcsr;
     int i;
 
-    /* Identification must read back so the driver would probe. */
-    g_assert_cmphex(rd(qts, SAI_VERID), ==, 0x03030000);
+    /*
+     * Identification must read back so the driver would probe - and it must
+     * read back what the SILICON says, not what the model finds convenient.
+     *
+     * VERID: the RM reports 0x0302_0002. We report 0x0302_0000: the real major
+     * and minor, with the FEATURE word deliberately cleared. Bit 1 is TSTMP_EN
+     * and fsl_sai gates real code on it; we do not model the timestamp engine,
+     * so we must not advertise it - under-reporting a capability is the only
+     * direction that is safe both here and on the board.
+     *
+     * This assertion used to pin 0x0303_0000 - a minor version the chip does
+     * not have, invented to keep a driver path out of probe. The test was
+     * guarding the fabrication. Assert against the manual, not against the
+     * model: a test written against the model ratifies whatever the model does.
+     *
+     * PARAM: the RM's summary table declines to give a value ("See section"),
+     * so this is not checked against it. What must hold is that the model does
+     * not advertise more FIFO than it provides - PARAM's WPF field says 2^7 =
+     * 128 words, and the model's array is 128.
+     */
+    g_assert_cmphex(rd(qts, SAI_VERID), ==, 0x03020000);
     g_assert_cmphex(rd(qts, SAI_PARAM), ==, 0x00050704);
 
     /* Program a watermark and enable the data line. */
