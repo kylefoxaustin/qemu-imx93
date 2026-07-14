@@ -41,6 +41,50 @@ done
 command -v "$CROSS" >/dev/null || skip "no cross compiler ($CROSS)"
 command -v "$MCXCC" >/dev/null || skip "no M33 compiler ($MCXCC) for the MCX firmware"
 
+# ---- peer-artifact provenance -------------------------------------------
+#
+# A path in a live worktree is not an artifact. We consume the MCX QEMU binary
+# and the M33 firmware source out of a peer checkout we neither own nor build,
+# so a PASS here can be about bytes that exist in no commit and that the peer's
+# next build overwrites. We cannot obey "never test a binary you did not just
+# build" - we never build theirs - so we obey its dual: never run against an
+# artifact whose provenance we did not verify.
+#
+# Refuse rather than warn. A warning printed above a green result is a warning
+# nobody reads.
+#
+PEER_SHA=unknown
+PEER_DIRTY=no
+if git -C "$RMCX" rev-parse --git-dir >/dev/null 2>&1; then
+    PEER_SHA=$(git -C "$RMCX" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    [ -z "$(git -C "$RMCX" status --porcelain 2>/dev/null)" ] || PEER_DIRTY=yes
+fi
+PEER_MD5=$(md5sum "$QEMUMCX" 2>/dev/null | cut -d' ' -f1)
+
+# A binary older than the sources it was built from tests code the peer has
+# already changed - the stale-binary bug, one repo over. That is never useful.
+if [ -n "$(find "$RMCX/hw" "$RMCX/include" -type f \( -name '*.c' -o -name '*.h' \) \
+             -newer "$QEMUMCX" -print -quit 2>/dev/null)" ]; then
+    die "peer QEMU is STALE: $QEMUMCX is older than sources in $RMCX.
+     The peer edited code and did not rebuild, so this run would test bytes
+     they have already replaced. Rebuild the peer, or set QEMUMCX= explicitly."
+fi
+
+# A dirty peer worktree means the binary and firmware we are about to run exist
+# in no commit: the result cannot be attributed to anything. Allow it only if
+# the caller says so out loud, and stamp the result when they do.
+PROVENANCE="peer=$PEER_SHA md5=$PEER_MD5"
+if [ "$PEER_DIRTY" = yes ]; then
+    if [ "${ALLOW_UNPROVENANCED_PEER:-0}" != 1 ]; then
+        die "peer worktree is DIRTY at $PEER_SHA ($RMCX).
+     The MCX QEMU and M33 firmware this run would use exist in no commit, so a
+     PASS could not be attributed to any peer state. Commit the peer, or set
+     ALLOW_UNPROVENANCED_PEER=1 to run anyway (the result will say so)."
+    fi
+    PROVENANCE="$PROVENANCE DIRTY(UNPROVENANCED)"
+fi
+echo "peer artifact: $PROVENANCE"
+
 SOCK=$(mktemp -u /tmp/imx93-mcx-spi.XXXXXX.sock)
 WORK=$(mktemp -d)
 MPID=
@@ -114,7 +158,7 @@ echo "================== 93 <-> MCX SPI LINK =================="
 echo "--- i.MX 93 (Linux fsl-lpspi) ---"; grep -aE 'SPIPEER' "$CLOG" | grep -avE '^\[' | tail -2
 echo "--- MCXN947 (bare-metal M33) ---"; grep -aiE 'SPI LINK' "$MCXCON" | tail -2
 if grep -aq 'SPIPEER:RXOK' "$CLOG" && grep -aiq 'SPI LINK PASS' "$MCXCON"; then
-    echo "PASS: i.MX 93 Linux fsl-lpspi <-> MCXN947 bare-metal M33, byte-exact both directions over the shared spi-link"
+    echo "PASS: i.MX 93 Linux fsl-lpspi <-> MCXN947 bare-metal M33, byte-exact both directions over the shared spi-link [$PROVENANCE]"
     exit 0
 fi
 die "cross-SoC spi link did not complete"
