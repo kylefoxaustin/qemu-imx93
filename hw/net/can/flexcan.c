@@ -50,6 +50,21 @@
 #define MCR_FDEN      (1u << 11)
 #define MCR_MAXMB     0x7f
 
+/*
+ * MCR reset value per the i.MX 93 RM: 0x5980_040F.
+ *   MDIS = 0     module ENABLED out of reset (silicon comes up enabled+frozen)
+ *   FRZ, HALT, FRZ_ACK, NOT_RDY   frozen and not ready - the bus is idle
+ *   SUPV = 1     supervisor access mode
+ *   MAXMB = 0xF  16 message buffers active at reset
+ * (plus one reserved-default bit). The old reset hand-assembled MDIS | ... |
+ * MAXMB(0x7f): it came up DISABLED, with SUPV clear and MAXMB advertising 128
+ * mailboxes the silicon does not have. fsl_flexcan read-modify-writes MCR, so
+ * the guest laundered all three back into its own config. Safe here because
+ * flexcan_mb_count() derives from the bank size, not MAXMB, and bus_active
+ * still reads idle at reset (FRZ_ACK set).
+ */
+#define MCR_RESET     0x5980040fu
+
 /* Message-buffer control/status (CS) word */
 #define MB_CODE_MASK    (0xfu << 24)
 #define MB_CODE_RX_INACTIVE (0x0u << 24)
@@ -495,9 +510,8 @@ static void flexcan_reset_hold(Object *obj, ResetType type)
     FlexCanState *s = FLEXCAN(obj);
 
     memset(s->regs, 0, sizeof(s->regs));
-    /* Post-reset: disabled + frozen, acks asserted, max mailboxes. */
-    s->regs[FLEXCAN_MCR / 4] = MCR_MDIS | MCR_FRZ | MCR_HALT | MCR_NOT_RDY |
-                               MCR_FRZ_ACK | MCR_LPM_ACK | MCR_MAXMB;
+    /* Post-reset: enabled + frozen, SUPV set, 16 mailboxes (RM MCR value). */
+    s->regs[FLEXCAN_MCR / 4] = MCR_RESET;
     flexcan_update_irq(s);
 }
 

@@ -86,13 +86,21 @@ static void imx93_sai_tx_update_flags(IMX93SaiState *s)
     uint32_t tcsr = R(s, SAI_TCSR) & ~TCSR_RO;
     uint32_t watermark = R(s, SAI_TCR1) & 0xff;
 
-    /* FRF: FIFO level at or below the watermark - hardware wants more data. */
-    if (s->tx_count <= watermark) {
-        tcsr |= TCSR_FRF;
-    }
-    /* FWF: FIFO empty - one step from underrun. */
-    if (s->tx_count == 0) {
-        tcsr |= TCSR_FWF;
+    /*
+     * The FIFO request/warning flags describe an ENABLED transmit FIFO: the RM
+     * ties them to TCSR.TE. A disabled transmitter must not report "FIFO wants
+     * data" - a driver polling TCSR on an off SAI would otherwise see a request
+     * from a FIFO that is not clocking. Only evaluate them while TE is set.
+     */
+    if (tcsr & TCSR_TE) {
+        /* FRF: FIFO level at or below the watermark - hardware wants data. */
+        if (s->tx_count <= watermark) {
+            tcsr |= TCSR_FRF;
+        }
+        /* FWF: FIFO empty - one step from underrun. */
+        if (s->tx_count == 0) {
+            tcsr |= TCSR_FWF;
+        }
     }
     R(s, SAI_TCSR) = tcsr;
 }
@@ -177,13 +185,17 @@ static void imx93_sai_rx_update_flags(IMX93SaiState *s)
     uint32_t rcsr = R(s, SAI_RCSR) & ~TCSR_RO;
     uint32_t watermark = R(s, SAI_RCR1) & 0xff;
 
-    /* FRF: FIFO level above the watermark - data is ready to be drained. */
-    if (s->rx_count > watermark) {
-        rcsr |= TCSR_FRF;
-    }
-    /* FWF: FIFO full - one step from overrun. */
-    if (s->rx_count >= IMX93_SAI_FIFO_DEPTH) {
-        rcsr |= TCSR_FWF;
+    /* Like TX, the receive FIFO flags describe an ENABLED receiver (RCSR.RE,
+     * bit 31 - same mask as TCSR_TE). A disabled receiver reports no data. */
+    if (rcsr & TCSR_TE) {
+        /* FRF: FIFO level above the watermark - data is ready to be drained. */
+        if (s->rx_count > watermark) {
+            rcsr |= TCSR_FRF;
+        }
+        /* FWF: FIFO full - one step from overrun. */
+        if (s->rx_count >= IMX93_SAI_FIFO_DEPTH) {
+            rcsr |= TCSR_FWF;
+        }
     }
     R(s, SAI_RCSR) = rcsr;
 }

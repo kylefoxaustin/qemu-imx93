@@ -22,6 +22,14 @@
 #define EDMA1   0x44000000
 
 #define LCDIF1  0x4ae30000
+#define FLEXCAN1 0x443a0000
+#define SAI1    0x443b0000
+
+/* SAI TCSR + flag bits. */
+#define SAI_TCSR    0x08
+#define TCSR_FR     (1u << 25)  /* FIFO reset (self-clearing) */
+#define TCSR_FWF    (1u << 17)  /* FIFO warning */
+#define TCSR_FRF    (1u << 16)  /* FIFO request */
 
 /* eDMA: channel N's page is at base + (N+1)*0x10000; CH_SBR at page offset 0xc. */
 #define EDMA_CH0_SBR (EDMA1 + 0x10000 + 0x0c)
@@ -116,6 +124,38 @@ static void test_lcdif_reset(void)
     qtest_quit(qts);
 }
 
+static void test_flexcan_reset(void)
+{
+    QTestState *qts = qtest_init("-machine imx93-11x11-evk -accel qtest");
+
+    /*
+     * RM MCR reset = 0x5980_040F: module ENABLED (MDIS clear) and frozen,
+     * SUPV set, MAXMB = 0xF (16 mailboxes). fsl_flexcan read-modify-writes MCR,
+     * so coming up disabled / SUPV-clear / MAXMB=0x7f would launder all three.
+     */
+    g_assert_cmphex(qtest_readl(qts, FLEXCAN1 + 0x00), ==, 0x5980040f);
+
+    qtest_quit(qts);
+}
+
+static void test_sai_disabled_flags(void)
+{
+    QTestState *qts = qtest_init("-machine imx93-11x11-evk -accel qtest");
+
+    /*
+     * The FIFO request/warning flags describe an ENABLED transmit FIFO. Writing
+     * TCSR.FR re-evaluates them against an empty FIFO; with TE clear (disabled
+     * transmitter), FRF/FWF must stay clear - silicon does not report a FIFO
+     * request from a transmitter that is switched off.
+     */
+    qtest_writel(qts, SAI1 + SAI_TCSR, TCSR_FR);   /* FIFO reset, TE clear */
+    uint32_t tcsr = qtest_readl(qts, SAI1 + SAI_TCSR);
+    g_assert_false(tcsr & TCSR_FRF);
+    g_assert_false(tcsr & TCSR_FWF);
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -123,5 +163,7 @@ int main(int argc, char **argv)
     qtest_add_func("/imx93/reset/wdog", test_wdog_reset);
     qtest_add_func("/imx93/reset/edma", test_edma_reset);
     qtest_add_func("/imx93/reset/lcdif", test_lcdif_reset);
+    qtest_add_func("/imx93/reset/flexcan", test_flexcan_reset);
+    qtest_add_func("/imx93/reset/sai-disabled-flags", test_sai_disabled_flags);
     return g_test_run();
 }
