@@ -54,7 +54,16 @@ static uint8_t adv7535_rx(I2CSlave *i2c)
 
     switch (reg) {
     case ADV7535_REG_CHIP_REVISION:
-        return 0x14;                            /* arbitrary, only logged */
+        /*
+         * Not sourced from the ADV7535 datasheet, and safe to leave so: the
+         * adv7511 driver reads this register once and only dev_dbg()s it
+         * ("Rev. %d", adv7511_drv.c) - it never validates or branches on the
+         * value. Unlike a chip-ID (mt9m114 0x2481, ov5640 0x5640, both checked
+         * by their drivers and both the real datasheet values here), nothing
+         * acts on the revision, so an unsourced constant is inert rather than a
+         * fabrication a consumer could trust.
+         */
+        return 0x14;
     case ADV7535_REG_STATUS:
         return STATUS_HPD | STATUS_MONITOR_SENSE;
     case ADV7535_REG_INT0:
