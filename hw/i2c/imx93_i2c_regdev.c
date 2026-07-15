@@ -77,35 +77,65 @@ static void imx93_i2c_regdev_reset(DeviceState *dev)
     s->regs[0] = s->reg0;
     if (s->pca9450) {
         /*
-         * BUCK/LDO reset values, BIT-EXACT to the PCA9451A datasheet OTP
-         * power-on defaults (93_docs/PCA9451A-datasheet.pdf rev 2.1, Table 17
-         * register overview + the per-register bit-field tables), replacing the
-         * old DT-range scaffolding (which read BUCK4, the 3.3V SD supply, back
-         * at ~1.625V).
+         * Full PCA9451A power-on register file, BIT-EXACT to the datasheet OTP
+         * defaults (93_docs/PCA9451A-datasheet.pdf rev 2.1, Table 17 register
+         * overview, cross-checked against the per-register bit-field tables).
          *
-         * These were first derived from the fact-sheet operating voltages and
-         * the mainline pca9450 vsel encoding, then confirmed against the
-         * datasheet: three of the four matched to the bit (BUCK4=0x6C=3.3V,
-         * BUCK5=0x30=1.8V, BUCK6=0x14=1.1V), which is why the derivation was
-         * trustworthy.  The datasheet then corrected the one field the encoding
-         * could not give: LDO1CTRL's OTP is 0xC2, not 0x02 - L1_OUT[2:0]=010 is
-         * 1.8V (the derived voltage was right) but ENMODE[7:6]=11 is "Always
-         * ON", which the derived value left at 00 (OFF).  On silicon LDO1 powers
-         * up enabled; that is the bit the datasheet was needed for.
+         * The model is a dumb read-what-you-write regfile, so seeding a register
+         * only changes what the pca9450 driver READS at probe - it never makes
+         * the model DO anything.  Seeding the true OTP defaults means every rail
+         * the driver registers reports its real silicon voltage/enable state
+         * instead of the memset-0 value.  Only the non-zero defaults are listed;
+         * every unlisted register resets to 0 (already done by the memset).
+         *
+         * Register 0x00 (Device_ID) is left to the reg0 property, which the
+         * board sets to 0x90 - the datasheet's own Device_ID reset value.
+         *
+         * Voltage spot-checks (pca9451a encoding: DVS bucks 0.65V @0x00 +12.5mV;
+         * BUCK4/5/6 0.60V @0x00 +25mV; LDO1 1.6V @0x00 +100mV): BUCK3 DVS0=0x10
+         * -> 0.85V, BUCK4=0x6C -> 3.3V (EVK SD supply), BUCK5=0x30 -> 1.8V,
+         * BUCK6=0x14 -> 1.1V, LDO1=0xC2 -> ENMODE=11 (always on) + 1.8V.
          *
          * The driver reads these live (REGCACHE_MAPLE, no reg_defaults, so no
-         * "update_bits skips the write" hazard) and each is inside its rail's DT
-         * range, so the rails register and unblock uSDHC.  Boot-verified: guest
-         * regulator sysfs reads 3.3 / 1.8 / 1.1 / 1.8 V.
-         *
-         * (The other rails - BUCK1-3, LDO2-5 - are still left at the memset-0
-         * value; the full datasheet is now in-repo if a complete OTP-faithful
-         * seed is wanted, but that is a larger, separately-verified change.)
+         * "update_bits skips the write" hazard).  Boot-verified: pca9451a
+         * probes, all rails register (0 failures), guest regulator sysfs reads
+         * the datasheet voltages, mmc0-2 come up.
          */
-        s->regs[0x1A] = 0x6C;   /* BUCK4OUT: OTP default -> 3.3V (EVK SD supply) */
-        s->regs[0x1C] = 0x30;   /* BUCK5OUT: OTP default -> 1.8V                 */
-        s->regs[0x1E] = 0x14;   /* BUCK6OUT: OTP default -> 1.1V                 */
-        s->regs[0x21] = 0xC2;   /* LDO1CTRL: OTP default -> ENMODE=11 (always on) + 1.8V */
+        static const struct { uint8_t reg, val; } pca9451a_otp[] = {
+            { 0x02, 0xFF },   /* INT1_MSK      - all sources masked            */
+            { 0x07, 0x6C },   /* PWR_CTRL      - debounce/step timing          */
+            { 0x08, 0x21 },   /* RESET_CTRL                                    */
+            { 0x09, 0x50 },   /* CONFIG1       - LOW_VSYS / VSYS_UVLO          */
+            { 0x0C, 0xA8 },   /* BUCK123_DVS   - DVS preset config             */
+            { 0x0D, 0x1C },   /* BUCK1OUT_LIMIT                                */
+            { 0x0E, 0x28 },   /* BUCK2OUT_LIMIT                                */
+            { 0x0F, 0x1C },   /* BUCK3OUT_LIMIT                                */
+            { 0x10, 0x49 },   /* BUCK1CTRL     - ramp + B1_ENMODE              */
+            { 0x11, 0x10 },   /* BUCK1OUT_DVS0 - 0.85V                         */
+            { 0x12, 0x10 },   /* BUCK1OUT_DVS1 - 0.85V                         */
+            { 0x13, 0x49 },   /* BUCK2CTRL                                     */
+            /* 0x14/0x15 BUCK2OUT_DVS0/1 = 0x00 (0.65V) -> memset              */
+            { 0x16, 0x49 },   /* BUCK3CTRL                                     */
+            { 0x17, 0x10 },   /* BUCK3OUT_DVS0 - 0.85V                         */
+            { 0x18, 0x10 },   /* BUCK3OUT_DVS1 - 0.85V                         */
+            { 0x19, 0x09 },   /* BUCK4CTRL     - B4_ENMODE                     */
+            { 0x1A, 0x6C },   /* BUCK4OUT      - 3.3V (EVK SD supply)          */
+            { 0x1B, 0x09 },   /* BUCK5CTRL                                     */
+            { 0x1C, 0x30 },   /* BUCK5OUT      - 1.8V                          */
+            { 0x1D, 0x09 },   /* BUCK6CTRL                                     */
+            { 0x1E, 0x14 },   /* BUCK6OUT      - 1.1V                          */
+            { 0x20, 0xF8 },   /* LDO_AD_CTRL   - active-discharge enables      */
+            { 0x21, 0xC2 },   /* LDO1CTRL      - ENMODE=11 (always on) + 1.8V  */
+            { 0x23, 0x4A },   /* (reserved, non-zero OTP)                      */
+            { 0x24, 0x40 },   /* LDO4CTRL                                      */
+            { 0x25, 0x4F },   /* LDO5CTRL_L                                    */
+            { 0x2A, 0x85 },   /* LOADSW_CTRL                                   */
+            { 0x2D, 0x3F },   /* VRFLT1_MASK                                   */
+            { 0x2E, 0x1F },   /* VRFLT2_MASK                                   */
+        };
+        for (int i = 0; i < ARRAY_SIZE(pca9451a_otp); i++) {
+            s->regs[pca9451a_otp[i].reg] = pca9451a_otp[i].val;
+        }
     }
     if (s->pcal6524) {
         /*
