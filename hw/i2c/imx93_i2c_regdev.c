@@ -77,39 +77,35 @@ static void imx93_i2c_regdev_reset(DeviceState *dev)
     s->regs[0] = s->reg0;
     if (s->pca9450) {
         /*
-         * BUCK/LDO voltage-select resets, DERIVED so each rail reads back at its
-         * EVK operating voltage - not the old DT-range scaffolding (which put
-         * BUCK4, the 3.3V SD supply, at ~1.625V) and not a fabricated guess.
+         * BUCK/LDO reset values, BIT-EXACT to the PCA9451A datasheet OTP
+         * power-on defaults (93_docs/PCA9451A-datasheet.pdf rev 2.1, Table 17
+         * register overview + the per-register bit-field tables), replacing the
+         * old DT-range scaffolding (which read BUCK4, the 3.3V SD supply, back
+         * at ~1.625V).
          *
-         * These are a LAW-1 derived value from two authoritative sources:
-         *   - the operating rail voltages, from the PCA9451A fact sheet
-         *     (93_docs/IMXPCA9451A4FS.pdf): BUCK4 3.3V, BUCK5 1.8V, BUCK6 1.1V,
-         *     LDO1 1.8V;
-         *   - the vsel encoding, from mainline drivers/regulator/pca9450-
-         *     regulator.c + include/linux/regulator/pca9450.h:
-         *       BUCKnOUT (mask 0x7F): 0.600V at 0x00, +25mV/step  -> sel = (V-0.6)/0.025
-         *       LDO1CTRL (vsel mask 0x07, enable mask 0xC0): 1.600V at 0x00, +100mV/step
-         * so e.g. BUCK4 = (3.3-0.6)/0.025 = 108 = 0x6C.  As a cross-check the
-         * method reproduces the one selector the old scaffold already had right,
-         * BUCK6 = 0x14 = 1.1V.
-         *
-         * This is DERIVED, not the datasheet's OTP-default column read verbatim:
-         * we set only the vsel bits to the operating voltage and leave the
-         * enable/mode bits at 0 (as before).  Bit-exact confirmation of the full
-         * OTP byte - enable state, mode, reserved bits - still wants the gated
-         * PCA9451A datasheet register/OTP table (93_docs/ has only the 2-page
-         * fact sheet).  But for every field the pca9450 driver actually reads,
-         * these now match silicon: get_voltage returns the true rail voltage
-         * instead of a fabricated one.
+         * These were first derived from the fact-sheet operating voltages and
+         * the mainline pca9450 vsel encoding, then confirmed against the
+         * datasheet: three of the four matched to the bit (BUCK4=0x6C=3.3V,
+         * BUCK5=0x30=1.8V, BUCK6=0x14=1.1V), which is why the derivation was
+         * trustworthy.  The datasheet then corrected the one field the encoding
+         * could not give: LDO1CTRL's OTP is 0xC2, not 0x02 - L1_OUT[2:0]=010 is
+         * 1.8V (the derived voltage was right) but ENMODE[7:6]=11 is "Always
+         * ON", which the derived value left at 00 (OFF).  On silicon LDO1 powers
+         * up enabled; that is the bit the datasheet was needed for.
          *
          * The driver reads these live (REGCACHE_MAPLE, no reg_defaults, so no
-         * "update_bits skips the write" hazard) and each value is inside its
-         * rail's DT range, so the rails still register and unblock uSDHC.
+         * "update_bits skips the write" hazard) and each is inside its rail's DT
+         * range, so the rails register and unblock uSDHC.  Boot-verified: guest
+         * regulator sysfs reads 3.3 / 1.8 / 1.1 / 1.8 V.
+         *
+         * (The other rails - BUCK1-3, LDO2-5 - are still left at the memset-0
+         * value; the full datasheet is now in-repo if a complete OTP-faithful
+         * seed is wanted, but that is a larger, separately-verified change.)
          */
-        s->regs[0x1A] = 0x6C;   /* BUCK4OUT vsel -> 3.3V (EVK SD supply) */
-        s->regs[0x1C] = 0x30;   /* BUCK5OUT vsel -> 1.8V                 */
-        s->regs[0x1E] = 0x14;   /* BUCK6OUT vsel -> 1.1V                 */
-        s->regs[0x21] = 0x02;   /* LDO1CTRL vsel[2:0] -> 1.8V (en bits[7:6]=0) */
+        s->regs[0x1A] = 0x6C;   /* BUCK4OUT: OTP default -> 3.3V (EVK SD supply) */
+        s->regs[0x1C] = 0x30;   /* BUCK5OUT: OTP default -> 1.8V                 */
+        s->regs[0x1E] = 0x14;   /* BUCK6OUT: OTP default -> 1.1V                 */
+        s->regs[0x21] = 0xC2;   /* LDO1CTRL: OTP default -> ENMODE=11 (always on) + 1.8V */
     }
     if (s->pcal6524) {
         /*
