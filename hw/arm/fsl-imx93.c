@@ -971,6 +971,7 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
                            qdev_get_gpio_in(gicdev, FSL_IMX93_LPI2C8_IRQ));
 
         pca = i2c_slave_new(TYPE_IMX93_I2C_REGDEV, FSL_IMX93_PCA9538_ADDR);
+        qdev_prop_set_bit(DEVICE(pca), "pca9538", true);
         i2c_slave_realize_and_unref(pca, s->lpi2c8.bus, &error_abort);
 
         i2c_slave_realize_and_unref(

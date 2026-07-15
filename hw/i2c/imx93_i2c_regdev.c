@@ -35,6 +35,7 @@ struct IMX93I2CRegdevState {
     uint8_t reg0;       /* reset value of register 0 (e.g. a device id) */
     bool    pca9450;    /* preset PCA9450/51 BUCK/LDO vsel registers */
     bool    pcal6524;   /* preset PCAL6524 config regs to all-input */
+    bool    pca9538;    /* preset PCA9538 output+config regs to POR */
 };
 
 static int imx93_i2c_regdev_event(I2CSlave *i2c, enum i2c_event event)
@@ -152,6 +153,26 @@ static void imx93_i2c_regdev_reset(DeviceState *dev)
         s->regs[0x0c] = s->regs[0x0d] = s->regs[0x0e] = 0xff;
         s->regs[0x8c] = s->regs[0x8d] = s->regs[0x8e] = 0xff;
     }
+    if (s->pca9538) {
+        /*
+         * PCA9538 power-on reset defaults, from the datasheet register table
+         * (TI PCA9538 rev, 93_docs/PCA9538-datasheet-TI.pdf: "at power-on reset
+         * all registers return to default values"):
+         *   0x00 Input Port     - X (reflects pin levels) -> leave memset 0
+         *   0x01 Output Port    - 1111 1111 = 0xFF
+         *   0x02 Polarity Inv   - 0000 0000 = 0x00        -> memset already 0
+         *   0x03 Configuration  - 1111 1111 = 0xFF (all pins INPUTS)
+         * The memset-0 default got 0x03 wrong as all-OUTPUTS, which is not a
+         * physical POR and is the same shape as the PCAL6524 direction bug: the
+         * pca953x driver refuses to flag an output pin for IRQ. Unlike the
+         * 24-bit PCAL6524, the 8-bit PCA9538 is single-bank and addressed
+         * directly (no 0x80 auto-increment), so seed the plain register offsets.
+         * The driver still drives the camera reset pin to output when it claims
+         * it - this only fixes what an unclaimed pin and a config read-back show.
+         */
+        s->regs[0x01] = 0xff;   /* Output Port:   all high (POR)   */
+        s->regs[0x03] = 0xff;   /* Configuration: all inputs (POR) */
+    }
     s->ptr = 0;
     s->have_ptr = false;
 }
@@ -160,6 +181,7 @@ static const Property imx93_i2c_regdev_props[] = {
     DEFINE_PROP_UINT8("reg0", IMX93I2CRegdevState, reg0, 0),
     DEFINE_PROP_BOOL("pca9450", IMX93I2CRegdevState, pca9450, false),
     DEFINE_PROP_BOOL("pcal6524", IMX93I2CRegdevState, pcal6524, false),
+    DEFINE_PROP_BOOL("pca9538", IMX93I2CRegdevState, pca9538, false),
 };
 
 static const VMStateDescription vmstate_imx93_i2c_regdev = {
