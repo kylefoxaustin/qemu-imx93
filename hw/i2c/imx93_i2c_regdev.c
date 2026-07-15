@@ -77,37 +77,39 @@ static void imx93_i2c_regdev_reset(DeviceState *dev)
     s->regs[0] = s->reg0;
     if (s->pca9450) {
         /*
-         * BRING-UP SCAFFOLDING - these are NOT the PCA9451A's silicon defaults.
+         * BUCK/LDO voltage-select resets, DERIVED so each rail reads back at its
+         * EVK operating voltage - not the old DT-range scaffolding (which put
+         * BUCK4, the 3.3V SD supply, at ~1.625V) and not a fabricated guess.
          *
-         * The real part powers up with OTP-programmed selectors; this model
-         * starts every register at 0 (the memset above), which is itself not a
-         * physical state. From 0 (lowest voltage) the pca9450 driver refuses to
-         * register the rails whose DT minimum is well above that, returning on
-         * the first failure ("Failed to register regulator(buck4): -22"). So we
-         * seed the voltage-select registers to *a* selector inside each rail's
-         * DT-constrained range - enough to let the rails register and unblock
-         * uSDHC et al. - chosen to satisfy the driver, not to match the chip.
+         * These are a LAW-1 derived value from two authoritative sources:
+         *   - the operating rail voltages, from the PCA9451A fact sheet
+         *     (93_docs/IMXPCA9451A4FS.pdf): BUCK4 3.3V, BUCK5 1.8V, BUCK6 1.1V,
+         *     LDO1 1.8V;
+         *   - the vsel encoding, from mainline drivers/regulator/pca9450-
+         *     regulator.c + include/linux/regulator/pca9450.h:
+         *       BUCKnOUT (mask 0x7F): 0.600V at 0x00, +25mV/step  -> sel = (V-0.6)/0.025
+         *       LDO1CTRL (vsel mask 0x07, enable mask 0xC0): 1.600V at 0x00, +100mV/step
+         * so e.g. BUCK4 = (3.3-0.6)/0.025 = 108 = 0x6C.  As a cross-check the
+         * method reproduces the one selector the old scaffold already had right,
+         * BUCK6 = 0x14 = 1.1V.
          *
-         * They are therefore wrong as silicon values: e.g. BUCK4 is the EVK's
-         * 3.3V SD supply (per the PCA9451A fact sheet) but reads back ~1.625V
-         * here. The driver reads these live - REGCACHE_MAPLE with no
-         * reg_defaults, so there is no stale-cache "update_bits skips the write"
-         * hazard - which makes this a visible fidelity gap, not a silent one:
-         * a guest that reads a regulator's voltage before its consumer sets it
-         * gets a fabricated number. It does not block boot (soak-proven) and the
-         * registers stay writable, so voltage switching still works.
+         * This is DERIVED, not the datasheet's OTP-default column read verbatim:
+         * we set only the vsel bits to the operating voltage and leave the
+         * enable/mode bits at 0 (as before).  Bit-exact confirmation of the full
+         * OTP byte - enable state, mode, reserved bits - still wants the gated
+         * PCA9451A datasheet register/OTP table (93_docs/ has only the 2-page
+         * fact sheet).  But for every field the pca9450 driver actually reads,
+         * these now match silicon: get_voltage returns the true rail voltage
+         * instead of a fabricated one.
          *
-         * TODO: replace with the true OTP power-on defaults. That needs the full
-         * PCA9451A datasheet register/OTP table; 93_docs/ currently holds only
-         * the 2-page fact sheet (nominal rail voltages, no register map), so the
-         * correct values are not yet in hand. Do NOT swap these for other
-         * guessed selectors - a plausible wrong number is worse than an honest
-         * scaffold, because it reads as measured.
+         * The driver reads these live (REGCACHE_MAPLE, no reg_defaults, so no
+         * "update_bits skips the write" hazard) and each value is inside its
+         * rail's DT range, so the rails still register and unblock uSDHC.
          */
-        s->regs[0x1A] = 0x29;   /* BUCK4OUT: DT-range scaffold (silicon: 3.3V SD rail) */
-        s->regs[0x1C] = 0x29;   /* BUCK5OUT: DT-range scaffold (silicon: 1.8V)         */
-        s->regs[0x1E] = 0x14;   /* BUCK6OUT: DT-range scaffold (silicon: 1.1V)         */
-        s->regs[0x21] = 0x01;   /* LDO1CTRL: DT-range scaffold (silicon: 1.8V)         */
+        s->regs[0x1A] = 0x6C;   /* BUCK4OUT vsel -> 3.3V (EVK SD supply) */
+        s->regs[0x1C] = 0x30;   /* BUCK5OUT vsel -> 1.8V                 */
+        s->regs[0x1E] = 0x14;   /* BUCK6OUT vsel -> 1.1V                 */
+        s->regs[0x21] = 0x02;   /* LDO1CTRL vsel[2:0] -> 1.8V (en bits[7:6]=0) */
     }
     if (s->pcal6524) {
         /*
