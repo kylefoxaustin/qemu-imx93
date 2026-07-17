@@ -68,3 +68,26 @@ the point — a caveat in the open is the opposite of a silent fail.
 - **Open:** sweep the other modelled blocks for silent no-op defaults on
   known-good paths (the same class as the NPU `default: v=0`), prioritised by
   Tier-A blocks (where a data path is claimed and a silent wrong would be worst).
+
+### Danger-zone sweep: divide-by-zero / period-0 livelock — re-verified clean
+
+Every division, modulo, and timer-period site in the imx93 models was traced
+individually (not a bare "clean"): a register that memsets to 0 but is used as
+a divisor, or a timer period of 0 that schedules a deadline already in the past
+and livelocks. Each hazard site carries an **explicit** guard:
+
+| Site | Hazard | Guard |
+|------|--------|-------|
+| `imx93_tpm.c` `ticks % period` | mod-by-zero | `period = (mod & 0xffff) + 1` (always ≥ 1) |
+| `imx93_isi.c` `pitch / width` | div-by-zero | enclosing `if (… && width && …)` |
+| `imx93_isi.c` `% n_frame_files` | mod-by-zero | `if (n_frame_files > 0)` |
+| `imx93_edma.c` `/ % chan_stride` | div-by-zero | realize rejects `chan_stride < MIN` |
+| `imx93_wdog.c` `toval*1000 / rate` | div-by-zero | `if (rate == 0 \|\| toval == 0) timer_del` |
+| SAI / MICFIL / XCVR timer period | period-0 livelock | fixed constants, or SAI's nonzero fallback |
+| `imx93_sysctr.c` compare | past-deadline re-arm | fires once + `timer_del`, no loop |
+
+The SAI's rate-follows-codec path states the rule in the code: *"a clock that
+is not running must not run infinitely fast"* — a zero rate falls back to a
+sane period with a `LOG_GUEST_ERROR`, never a 0. `imx_gpt` / `imx_epit` (the
+only `ptimer_set_freq` sites that take a possibly-zero freq) are not
+instantiated by imx93 — it uses `imx93_tpm` + `imx93_sysctr`.
