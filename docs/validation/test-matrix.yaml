@@ -33,7 +33,7 @@ harnesses:
   - harness: "qtest (device)"
     location: "tests/qtest/ethos-u-test, imx93-*-test"
     scope: "MMIO-level device behaviour, golden compares"
-    tests: [ethos-u-test, imx93-pxp-test, imx93-isi-test, imx93-sai-test, imx93-lpi2c-test, imx93-lpspi-test, imx93-flexio-test, imx93-flexspi-test, imx93-ele-test, flexcan-test, imx93-flexcan-test, imx93-reset-test]
+    tests: [ethos-u-test, imx93-pxp-test, imx93-isi-test, imx93-sai-test, imx93-lpi2c-test, imx93-lpspi-test, imx93-flexio-test, imx93-flexspi-test, imx93-ele-test, flexcan-test, imx93-flexcan-test, imx93-reset-test, imx93-pca9538-test]
   - harness: "Functional (boot)"
     location: "upstream/test_imx93_evk.py (staged for upstream)"
     scope: "Boot stock BSP Linux to userspace"
@@ -123,7 +123,8 @@ groups:
       - block: "ISI + MIPI-CSI + MT9M114 / OV5640"
         tier: A
         evidence: "Real V4L2 frames to /dev/video0; v4l2-compliance 48/48 ioctl + 55/55 streaming"
-        tests: [imx93-isi-test]
+        tests: [imx93-isi-test, imx93-pca9538-test]
+        notes: "Camera chip-IDs are the real datasheet values AND driver-validated: ov5640 0x5640 (ov5640_check_chip_id errors otherwise), mt9m114 0x2481. The PCA9538 camera expander (0x70 on LPI2C8) resets to its TI-datasheet POR (config 0xFF = all inputs, output 0xFF), not memset-0's all-outputs; imx93-pca9538-test drives a real LPI2C8 master transaction to read it back, mutation-proven"
       - block: "SAI3 + WM8962 codec"
         tier: A
         evidence: "Real PCM playback ASSERTED on the captured samples: run.sh always captures to a wav (driver=wav opens a file, never a device - simultaneously the mute and the evidence) and check_wav.py requires peak == 8000, ~1s of signal, and a 436 Hz tone, so a datapath that scaled, truncated or mis-paced the stream fails. Mutation-verified: halving the amplitude and dropping half the samples each fail, and each is missed by the other's gate. TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM"
@@ -162,8 +163,9 @@ groups:
         tests: [imx93-flexio-test]
       - block: "FlexSPI"
         tier: B
-        evidence: "qtest (NOR bring-up)"
+        evidence: "qtest (NOR bring-up + reset values / earned DLL lock)"
         tests: [imx93-flexspi-test]
+        notes: "AHBRXBUFnCR0 reset per-index to the RM's 0x800n_0020 (MSTRID = buffer index; a blanket seed mis-IDs every buffer). STS2 resets to 0x0100_0100 with the four DLL-lock bits CLEAR; the lock is EARNED when firmware writes DLLxCR[DLLEN] (nxp-fspi polls STS2 for it and would time out against memset-0), never seeded. Mutation-proven three ways incl. seed-locked-at-reset -> fails, enforcing earned-not-seeded. Latent in the stock dtb (FlexSPI status=disabled); the qtest is the reader"
       - block: "FlexCAN / CAN bus"
         tier: A
         evidence: "Board-to-board byte-exact via can-host-chardev (run-can.sh); cross-SoC 91<->93; qtest: RXIMR ID-match + overrun + disabled-controller gating (real CAN1->CAN2, mutation-verified). MCR reset value matches the RM (0x5980_040F: enabled+frozen, SUPV set, MAXMB=16) so the fsl_flexcan read-modify-write does not launder module-disable / wrong mailbox count"
