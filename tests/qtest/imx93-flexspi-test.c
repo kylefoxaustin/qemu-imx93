@@ -26,6 +26,12 @@
 #define FSPI_IPRXFCR 0xb8
 #define FSPI_RFDR   0x100
 #define FSPI_LUT    0x200
+#define FSPI_AHBRXBUF0CR0 0x20
+#define FSPI_DLLACR 0xc0
+#define FSPI_DLLBCR 0xc4
+#define FSPI_STS2   0xe8
+#define STS2_A_LOCK 0x00000003u     /* AREFLOCK | ASLVLOCK */
+#define STS2_B_LOCK 0x00030000u     /* BREFLOCK | BSLVLOCK */
 
 #define LUTKEY_VAL  0x5af05af0
 #define IS25WP064_JEDEC 0x17709d    /* 9d 70 17, packed little-endian */
@@ -72,9 +78,50 @@ static void test_read_id(void)
     qtest_quit(q);
 }
 
+/*
+ * Reset values (RM) and the earned DLL lock: STS2's lock bits must be CLEAR at
+ * reset and only assert once firmware enables the DLL - the "earned, not
+ * seeded" rule. nxp-fspi polls STS2 for lock after writing DLLxCR[DLLEN] and
+ * would time out if the lock never appeared (or wrongly succeed if it were
+ * seeded before configuration).
+ */
+static void test_reset_and_dll(void)
+{
+    QTestState *q = qtest_init("-machine imx93-11x11-evk -m 4G "
+                               "-display none -kernel /dev/null");
+    int n;
+
+    /* Per-index AHB RX buffer control-0 resets: 0x800n_0020 (MSTRID = n). */
+    for (n = 0; n < 8; n++) {
+        g_assert_cmphex(rd(q, FSPI_AHBRXBUF0CR0 + n * 4), ==,
+                        0x80000020u | (n << 16));
+    }
+
+    /* STS2 reset: SEL fields at phase 0, all four DLL-lock bits CLEAR. */
+    g_assert_cmphex(rd(q, FSPI_STS2), ==, 0x01000100u);
+    g_assert_cmphex(rd(q, FSPI_STS2) & (STS2_A_LOCK | STS2_B_LOCK), ==, 0);
+
+    /* Enabling the Flash A DLL earns AREFLOCK|ASLVLOCK, and only those. */
+    wr(q, FSPI_DLLACR, 0x1);                 /* DLLEN */
+    g_assert_cmphex(rd(q, FSPI_STS2) & STS2_A_LOCK, ==, STS2_A_LOCK);
+    g_assert_cmphex(rd(q, FSPI_STS2) & STS2_B_LOCK, ==, 0);
+
+    /* Enabling Flash B earns its pair; now the driver's AB_LOCK poll passes. */
+    wr(q, FSPI_DLLBCR, 0x1);
+    g_assert_cmphex(rd(q, FSPI_STS2) & (STS2_A_LOCK | STS2_B_LOCK), ==,
+                    STS2_A_LOCK | STS2_B_LOCK);
+
+    /* Disabling the DLL clears its lock again (silicon: the loop unlocks). */
+    wr(q, FSPI_DLLACR, 0x0);
+    g_assert_cmphex(rd(q, FSPI_STS2) & STS2_A_LOCK, ==, 0);
+
+    qtest_quit(q);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
     qtest_add_func("imx93/flexspi/read-id", test_read_id);
+    qtest_add_func("imx93/flexspi/reset-and-dll", test_reset_and_dll);
     return g_test_run();
 }

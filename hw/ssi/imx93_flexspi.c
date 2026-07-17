@@ -35,6 +35,14 @@
 #define FSPI_LCKCR      0x1c
 #define FSPI_STS0       0xe0
 #define FSPI_STS0_IDLE  0x3         /* ARB_IDLE | SEQ_IDLE */
+#define FSPI_AHBRXBUF0CR0 0x20      /* first of 8 per-index RX-buffer ctrl regs */
+#define FSPI_DLLACR     0xc0
+#define FSPI_DLLBCR     0xc4
+#define FSPI_DLLCR_DLLEN (1u << 0)
+#define FSPI_STS2       0xe8
+#define FSPI_STS2_RESET 0x01000100u /* SEL fields at phase 0, LOCK bits clear */
+#define FSPI_STS2_A_LOCK ((1u << 1) | (1u << 0))    /* AREFLOCK | ASLVLOCK */
+#define FSPI_STS2_B_LOCK ((1u << 17) | (1u << 16))  /* BREFLOCK | BSLVLOCK */
 #define FSPI_IPCR0      0xa0
 #define FSPI_IPCR1      0xa4
 #define FSPI_IPCMD      0xb0
@@ -217,6 +225,28 @@ static void flexspi_write(void *opaque, hwaddr offset, uint64_t value,
             flexspi_run_seq(s, seqid);
         }
         break;
+    case FSPI_DLLACR:
+        /*
+         * Enabling the Flash A DLL earns its lock in STS2 (silicon: the delay
+         * line locks shortly after DLLEN; the driver polls STS2 for it).
+         * Disabling clears it. Modelling the lock as immediate lets the poll
+         * succeed instead of timing out.
+         */
+        s->regs[FSPI_DLLACR >> 2] = value;
+        if (value & FSPI_DLLCR_DLLEN) {
+            s->regs[FSPI_STS2 >> 2] |= FSPI_STS2_A_LOCK;
+        } else {
+            s->regs[FSPI_STS2 >> 2] &= ~FSPI_STS2_A_LOCK;
+        }
+        break;
+    case FSPI_DLLBCR:
+        s->regs[FSPI_DLLBCR >> 2] = value;
+        if (value & FSPI_DLLCR_DLLEN) {
+            s->regs[FSPI_STS2 >> 2] |= FSPI_STS2_B_LOCK;
+        } else {
+            s->regs[FSPI_STS2 >> 2] &= ~FSPI_STS2_B_LOCK;
+        }
+        break;
     default:
         if ((offset >> 2) < IMX93_FLEXSPI_NUM_REGS) {
             s->regs[offset >> 2] = value;
@@ -269,6 +299,32 @@ static void flexspi_reset(DeviceState *dev)
     IMX93FlexSpiState *s = IMX93_FLEXSPI(dev);
 
     memset(s->regs, 0, sizeof(s->regs));
+
+    /*
+     * Per-index AHB RX buffer control-0 defaults (RM: AHBRXBUFnCR0 resets to
+     * 0x800n_0020 - PREFETCH set, MSTRID = the buffer's own index n, BUFSZ =
+     * 0x20). The blanket memset-0 above would leave every buffer with MSTRID 0
+     * and BUFSZ 0, mis-describing all eight; the index carries the MID, so a
+     * seed-one-into-all is wrong per-buffer.
+     */
+    for (int n = 0; n < 8; n++) {
+        s->regs[(FSPI_AHBRXBUF0CR0 + n * 4) >> 2] = 0x80000020u | (n << 16);
+    }
+
+    /* DLL control registers reset with OVRDEN set (RM: DLLxCR = 0x0000_0100). */
+    s->regs[FSPI_DLLACR >> 2] = 0x00000100u;
+    s->regs[FSPI_DLLBCR >> 2] = 0x00000100u;
+
+    /*
+     * STS2 reset (RM 0x0100_0100): the reference-delay SEL fields come up at
+     * phase 0, but the four DLL-lock bits (AREFLOCK/ASLVLOCK/BREFLOCK/BSLVLOCK)
+     * are CLEAR. The lock is EARNED when firmware enables the DLL (writes
+     * DLLxCR[DLLEN]), never seeded - silicon reports not-locked until the DLL
+     * is configured, and nxp-fspi polls STS2 for lock after DLLEN (it would
+     * time out against a memset-0 STS2).
+     */
+    s->regs[FSPI_STS2 >> 2] = FSPI_STS2_RESET;
+
     s->lut_unlocked = false;
     fifo8_reset(&s->rx);
     fifo8_reset(&s->tx);
