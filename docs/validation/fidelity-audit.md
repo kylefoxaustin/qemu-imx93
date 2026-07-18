@@ -106,15 +106,26 @@ Each Tier-A datapath oracle was classified, and the loose ones were proven loose
 | Camera (ISI) | byte-exact frame injection vs /dev/video0 | **tight** | inspection |
 | Storage (SD/uSDHC) | byte-exact ext2 R/W + migration value+wire oracle | **tight** | inspection |
 | NPU | argmax == host + byte-identical golden | **tight** | inspection |
-| **Audio (SAI)** | peak / dominant-tone / ~1s duration (statistical) | **LOOSE** | **measured** |
+| **Audio (SAI)** | peak / tone / duration **+ run-length structure** | **tightened** | self-test-proven (was called a dead-end; corrected) |
 | **Display (LCDIF/KMS)** | screendump structural: brightness variance + colour diversity | **tightened** | self-test-proven; R/B residual scoped |
 
-- **Audio, measured:** reintroducing the `audio_cb` advance-by-`chunk` bug loses
-  ~0.4% of frames, but the wav oracle passes — and the captured frame count has
-  ~10% run-to-run jitter (wall-clock ALSA under host load), 25x the bug, so the
-  oracle **cannot** be tightened to a count tolerance. `audio_cb` correctness is
-  therefore code-inspection + mutation-spot-checked; a deterministic short-write
-  test would need a mock backend (scoped, not built). Honest label, measured.
+- **Audio, was called a dead-end, now tightened (91emulator's method):** the
+  first pass concluded the audio oracle was un-tightenable — a `chunk`-drop loses
+  ~0.4% of frames and the captured frame **count** jitters ~10% run-to-run, 25x
+  the bug. That was the right measurement of the wrong metric. The count jitters;
+  the run **structure** does not. Two fixes: pin the wav rate
+  (`-audio driver=wav,out.frequency=$rate` in run.sh) so the mixer does **not**
+  resample 48k→44.1k, and assert the square wave's half-period **run lengths** —
+  with the rate pinned every interior run is exactly `SRC_HALF_PERIOD` (55)
+  frames; a dropped sample cuts one run short. Self-test-proven
+  (`check_wav.py --selftest`, no boot): a clean square wave has 0% off-length
+  runs, a 1-in-250-frame drop has **22%** — while its tone (437.8 Hz) stays inside
+  the 5% tolerance, so peak/tone/duration wave the drop through and only the run
+  check catches it. The real 93 capture is 0.0% off at both rates (deterministic
+  once the rate is pinned), so the threshold is 1%. Nuance: end-to-end the mixer
+  path dilutes a subtle drop (a 0.4% model drop reads ~1.3% off, not 22%), so the
+  *deterministic* proof lives in the self-test; the live test's clean baseline and
+  the pinned-rate determinism are what the run-length assertion rides on.
 - **Display, was proven loose, now tightened:** the old oracle scored
   `mean = sum(pixels)/N`, **invariant under any pixel permutation** — an R/B swap,
   a torn/shifted pattern, a shuffled framebuffer all preserve the byte-sum, and a
@@ -131,6 +142,6 @@ Each Tier-A datapath oracle was classified, and the loose ones were proven loose
   real display capture (`modetest` is absent in this env), so it is left as the
   further step rather than faked.
 
-The four byte-exact oracles catch what they claim; audio is a measured dead-end
-(oracle can't be tightened past the jitter); the display oracle is now tightened
+The four byte-exact oracles catch what they claim; both audio and display oracles are now
+tightened - audio via run-length structure, display via colour structure
 against the solid/monochrome class with the R/B-swap residual documented.

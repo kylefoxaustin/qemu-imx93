@@ -44,6 +44,15 @@ SRC_SECONDS = 1
 MIN_SIGNAL_FRACTION = 0.90
 TONE_TOLERANCE = 0.05
 
+# Run-length structure (91emulator's method): peak/tone/duration are SUMMARY
+# statistics - a scattered ~0.4% sample loss (the audio_cb advance-by-chunk bug)
+# moves none of them past tolerance, so it passes. The run LENGTHS do not lie:
+# with the wav rate pinned (run.sh passes out.frequency, so no 48k->44.1k
+# resample), every interior half-period is exactly SRC_HALF_PERIOD frames; a
+# dropped sample cuts one run short. Assert the fraction of off-length runs.
+RUN_TOLERANCE = 0          # exact: a dropped sample makes a 54-run, must count
+RUN_OFF_FRACTION = 0.01    # baseline is deterministically 0% (rate pinned); >1% = a real drop
+
 
 def parse_wav(path):
     """Read a wav QEMU wrote.
@@ -80,20 +89,34 @@ def main():
     nonzero = [s for s in left if s != 0]
     peak = max((abs(s) for s in left), default=0)
 
-    # Sign flips give the square wave's half period, hence its frequency.
+    # Sign flips give the square wave's half period, hence its frequency; the
+    # run LENGTH between flips is the structural signal a dropped sample breaks.
     flips = 0
     prev = 0
+    run = 0
+    runs = []
     for s in nonzero:
         sign = 1 if s > 0 else -1
         if prev and sign != prev:
             flips += 1
+            runs.append(run)
+            run = 0
+        run += 1
         prev = sign
     half_period = len(nonzero) / flips if flips else 0
     tone = rate / (2 * half_period) if half_period else 0
 
+    # Expected run length: SRC_HALF_PERIOD when the capture is at the play rate
+    # (rate pinned, no resample); scaled by the resample ratio otherwise.
+    exp_run = SRC_HALF_PERIOD * rate / play_rate
+    interior = runs[1:-1]                       # drop the partial end runs
+    off = sum(1 for r in interior if abs(r - exp_run) > RUN_TOLERANCE)
+    off_frac = off / len(interior) if interior else 1.0
+
     stats = (f"played {play_rate} Hz -> captured {len(left)} frames, {chans}ch, "
              f"{rate} Hz, peak {peak}, {len(nonzero)} carrying signal, "
-             f"tone {tone:.1f} Hz (want {src_tone:.1f})")
+             f"tone {tone:.1f} Hz (want {src_tone:.1f}), "
+             f"{off_frac * 100:.1f}% runs off {exp_run:.0f}")
 
     if os.environ.get("MEASURE"):
         print(f"capture: {stats}")
@@ -116,6 +139,12 @@ def main():
                      f"{play_rate} Hz stream: the SAI played it at the wrong "
                      f"rate (a model that assumes 48 kHz plays 16 kHz 3x fast)")
 
+    if off_frac > RUN_OFF_FRACTION:
+        fails.append(f"{off_frac * 100:.1f}% of half-period runs are off the "
+                     f"expected {exp_run:.0f} frames (allowed {RUN_OFF_FRACTION * 100:.0f}%): "
+                     f"the datapath dropped samples inside the stream - a loss that "
+                     f"peak/tone/duration cannot feel but the run structure does")
+
     if fails:
         print(f"capture: {stats}")
         for f in fails:
@@ -125,5 +154,48 @@ def main():
     print(f"capture verified: {stats}")
 
 
+def _selftest():
+    """Prove the run-length check catches a scattered drop that peak/tone/
+    duration wave through - deterministically, without a guest boot. Build a
+    clean +/-8000 square wave (55-frame runs) and a copy with 1-in-250 frames
+    dropped; the clean one must pass, the dropped one must fail on run structure.
+    """
+    def synth(drop_1_in=0):
+        rate = 48000
+        frames, sign, run = [], 1, 0
+        for _ in range(rate):
+            if run >= SRC_HALF_PERIOD:
+                sign = -sign
+                run = 0
+            frames.append(sign * SRC_PEAK)
+            run += 1
+        if drop_1_in:
+            frames = [f for j, f in enumerate(frames) if j % drop_1_in]
+        data = b"".join(struct.pack("<hh", f, f) for f in frames)   # L=R stereo
+        return (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE" + b"fmt "
+                + struct.pack("<IHHIIHH", 16, 1, 2, rate, rate * 4, 4, 16)
+                + b"data" + struct.pack("<I", len(data)) + data)
+
+    import subprocess
+    ok = True
+    for name, drop, want_pass in (("clean", 0, True), ("dropped", 250, False)):
+        p = f"/tmp/check_wav_selftest_{name}.wav"
+        open(p, "wb").write(synth(drop))
+        r = subprocess.run([sys.executable, __file__, p, "48000"],
+                           capture_output=True, text=True)
+        passed = r.returncode == 0
+        tag = "PASS" if passed == want_pass else "FAIL"
+        if tag == "FAIL":
+            ok = False
+        line = [l for l in (r.stdout + r.stderr).splitlines() if "runs off" in l]
+        print(f"  {tag}  {name:8s} -> {'accepted' if passed else 'rejected'}  "
+              f"{line[0].split('->')[-1].strip() if line else ''}")
+    print("  --- a 0.4% drop is invisible to tone/peak/duration, caught by runs ---"
+          if ok else "  --- SELFTEST FAILED ---")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
     main()

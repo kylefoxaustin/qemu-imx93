@@ -103,7 +103,7 @@ for RATE in $RATES; do
     rm -f "$WAV"
 
     timeout -s KILL "${TMO:-240}" "$QEMU" -M imx93-11x11-evk -m 4G -display none \
-        -audio "driver=wav,path=$WAV" \
+        -audio "driver=wav,path=$WAV,out.frequency=$RATE" \
         -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/combined.cpio.gz" \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
         -serial "file:$LOG" -serial null >/dev/null 2>&1 || true
