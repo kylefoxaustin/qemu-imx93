@@ -91,3 +91,39 @@ is not running must not run infinitely fast"* — a zero rate falls back to a
 sane period with a `LOG_GUEST_ERROR`, never a 0. `imx_gpt` / `imx_epit` (the
 only `ptimer_set_freq` sites that take a possibly-zero freq) are not
 instantiated by imx93 — it uses `imx93_tpm` + `imx93_sysctr`.
+
+### Oracle-tightness audit: does each Tier-A test CATCH a bug, or only EXERCISE it?
+
+A green test is only worth what it fails on. A cross-fleet SAI thread (rt1180
+found a lost-sample bug; 91/93 mutation-checked their shared model) surfaced the
+rule: **a test exercising a buggy path is not a test that catches the bug** — a
+loose or statistical oracle stays green while the bug manifests underneath it.
+Each Tier-A datapath oracle was classified, and the loose ones were proven loose:
+
+| Datapath | Oracle | Tightness | Basis |
+|----------|--------|-----------|-------|
+| Interconnect (eth/UART/SPI/CAN/I2C) | byte-exact payload compare | **tight** | inspection |
+| Camera (ISI) | byte-exact frame injection vs /dev/video0 | **tight** | inspection |
+| Storage (SD/uSDHC) | byte-exact ext2 R/W + migration value+wire oracle | **tight** | inspection |
+| NPU | argmax == host + byte-identical golden | **tight** | inspection |
+| **Audio (SAI)** | peak / dominant-tone / ~1s duration (statistical) | **LOOSE** | **measured** |
+| **Display (LCDIF/KMS)** | screendump mean-brightness > black threshold | **LOOSE** | **proven** |
+
+- **Audio, measured:** reintroducing the `audio_cb` advance-by-`chunk` bug loses
+  ~0.4% of frames, but the wav oracle passes — and the captured frame count has
+  ~10% run-to-run jitter (wall-clock ALSA under host load), 25x the bug, so the
+  oracle **cannot** be tightened to a count tolerance. `audio_cb` correctness is
+  therefore code-inspection + mutation-spot-checked; a deterministic short-write
+  test would need a mock backend (scoped, not built). Honest label, measured.
+- **Display, proven by arithmetic:** the oracle scores `mean = sum(pixels)/N`,
+  which is **invariant under any pixel permutation** — an R/B channel swap, a
+  torn/shifted pattern, a shuffled framebuffer all preserve the byte-sum. A whole
+  class of display bugs (wrong colours, value-preserving geometry errors) is
+  mathematically invisible to it; only an all-black scanout fails. **Proposed
+  fix:** score the SMPTE pattern's known per-region colours (or a golden
+  downsample signature), not global brightness — converts "pixels are lit" into
+  "the right pixels are lit."
+
+The four byte-exact oracles catch what they claim. The two visual/statistical
+ones are honestly labelled here rather than trusted; tightening the display
+oracle is the one actionable improvement (audio's is a measured dead-end).
