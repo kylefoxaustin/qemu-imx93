@@ -107,7 +107,7 @@ Each Tier-A datapath oracle was classified, and the loose ones were proven loose
 | Storage (SD/uSDHC) | byte-exact ext2 R/W + migration value+wire oracle | **tight** | inspection |
 | NPU | argmax == host + byte-identical golden | **tight** | inspection |
 | **Audio (SAI)** | peak / dominant-tone / ~1s duration (statistical) | **LOOSE** | **measured** |
-| **Display (LCDIF/KMS)** | screendump mean-brightness > black threshold | **LOOSE** | **proven** |
+| **Display (LCDIF/KMS)** | screendump structural: brightness variance + colour diversity | **tightened** | self-test-proven; R/B residual scoped |
 
 - **Audio, measured:** reintroducing the `audio_cb` advance-by-`chunk` bug loses
   ~0.4% of frames, but the wav oracle passes — and the captured frame count has
@@ -115,15 +115,22 @@ Each Tier-A datapath oracle was classified, and the loose ones were proven loose
   oracle **cannot** be tightened to a count tolerance. `audio_cb` correctness is
   therefore code-inspection + mutation-spot-checked; a deterministic short-write
   test would need a mock backend (scoped, not built). Honest label, measured.
-- **Display, proven by arithmetic:** the oracle scores `mean = sum(pixels)/N`,
-  which is **invariant under any pixel permutation** — an R/B channel swap, a
-  torn/shifted pattern, a shuffled framebuffer all preserve the byte-sum. A whole
-  class of display bugs (wrong colours, value-preserving geometry errors) is
-  mathematically invisible to it; only an all-black scanout fails. **Proposed
-  fix:** score the SMPTE pattern's known per-region colours (or a golden
-  downsample signature), not global brightness — converts "pixels are lit" into
-  "the right pixels are lit."
+- **Display, was proven loose, now tightened:** the old oracle scored
+  `mean = sum(pixels)/N`, **invariant under any pixel permutation** — an R/B swap,
+  a torn/shifted pattern, a shuffled framebuffer all preserve the byte-sum, and a
+  *solid fill* or *monochrome* frame (the garbage a wrong scanout format / base
+  address produces) passed it too. Replaced with a structural verdict
+  (`frame_verdict` in `media_conformance.py`): on a downsampled grid it now
+  requires **brightness variance** (a uniform / solid-fill frame → ~0 → FAIL) and
+  **colour diversity** (a monochrome frame → 1 colour → FAIL). Self-test-proven
+  (`media_conformance.py --selftest`): a solid-grey and a green-only frame both
+  PASS the old `mean ≥ 5` and both FAIL the new verdict, while a colour-bar frame
+  passes. **Residual, honestly scoped:** a structure-preserving R/B swap is still
+  invisible (variance and colour-count, like the mean, don't change under a global
+  channel swap) — catching *that* needs a golden SMPTE signature, which needs a
+  real display capture (`modetest` is absent in this env), so it is left as the
+  further step rather than faked.
 
-The four byte-exact oracles catch what they claim. The two visual/statistical
-ones are honestly labelled here rather than trusted; tightening the display
-oracle is the one actionable improvement (audio's is a measured dead-end).
+The four byte-exact oracles catch what they claim; audio is a measured dead-end
+(oracle can't be tightened past the jitter); the display oracle is now tightened
+against the solid/monochrome class with the R/B-swap residual documented.
