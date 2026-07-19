@@ -61,3 +61,6 @@ virtio_snd_handle_event(void) "event queue callback called"
 virtio_snd_pcm_stream_flush(uint32_t stream) "flushing stream %"PRIu32
 virtio_snd_handle_tx_xfer(void) "tx queue callback called"
 virtio_snd_handle_rx_xfer(void) "rx queue callback called"
+
+# imx93_micfil.c
+imx93_micfil_capture_start(uint64_t pdm_hz, uint64_t rate_hz) "pdm_root %"PRIu64" Hz -> sample rate %"PRIu64" Hz"

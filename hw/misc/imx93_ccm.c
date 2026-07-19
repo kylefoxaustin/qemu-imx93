@@ -29,6 +29,7 @@
 #include "qemu/osdep.h"
 #include "hw/misc/imx93_ccm.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/core/qdev-clock.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
 
@@ -40,6 +41,34 @@
 /* Register offsets within a root/gate block. */
 #define CCM_STAT_OFFSET     0x04
 #define CCM_AUTHEN_OFFSET   0x30
+
+/* Root CONTROL fields (clk-composite-93): DIV[7:0], MUX[9:8]. */
+#define CCM_CTRL_DIV_MASK   0xff
+#define CCM_CTRL_MUX_SHIFT  8
+#define CCM_CTRL_MUX_MASK   0x3
+
+/* Audio clock roots we produce a real rate for (clk-imx93 root offsets). */
+#define CCM_ROOT_PDM        0x2780
+#define CCM_ROOT_SPDIF      0x2a80
+
+/*
+ * pdm_root and spdif_root select their source with AUDIO_SEL (clk-imx93
+ * parent_names[AUDIO_SEL]): osc_24m, audio_pll, video_pll, clk_ext1. The audio
+ * path uses osc_24m at idle and audio_pll when a stream runs; the driver never
+ * routes PDM/SPDIF through video_pll or the external clock, so those two are
+ * left 0 (an unmodelled source, which the downstream device treats as "no
+ * clock" rather than a fabricated rate).
+ *
+ * osc_24m is the measured idle rate (guest clk_summary). audio_pll is 393.216
+ * MHz - the standard i.MX93 audio PLL (48000 * 8192), confirmed on the wire by
+ * the guest's clk_summary during capture (SOURCED, not fabricated).
+ */
+static const uint32_t ccm_audio_sel_hz[4] = {
+    24000000,       /* osc_24m   */
+    393216000,      /* audio_pll */
+    0,              /* video_pll  - not on the audio path */
+    0,              /* clk_ext1   - external, not present  */
+};
 
 /* STATUS.BUSY (root region, +0x04). */
 #define CCM_BUSY_SHIFT      28
@@ -79,6 +108,26 @@ static uint64_t imx93_ccm_read(void *opaque, hwaddr offset, unsigned size)
     return s->regs[offset / 4];
 }
 
+/* Rate an AUDIO_SEL root produces from its CONTROL register: src / (DIV + 1). */
+static uint64_t ccm_audio_root_hz(uint32_t control)
+{
+    uint32_t mux = (control >> CCM_CTRL_MUX_SHIFT) & CCM_CTRL_MUX_MASK;
+    uint32_t div = control & CCM_CTRL_DIV_MASK;
+
+    return ccm_audio_sel_hz[mux] / (div + 1);
+}
+
+static void imx93_ccm_update_audio_clock(IMX93CCMState *s, hwaddr control_off)
+{
+    Clock *clk = control_off == CCM_ROOT_PDM   ? s->pdm_root   :
+                 control_off == CCM_ROOT_SPDIF ? s->spdif_root : NULL;
+
+    if (clk) {
+        clock_set_hz(clk, ccm_audio_root_hz(s->regs[control_off / 4]));
+        clock_propagate(clk);
+    }
+}
+
 static void imx93_ccm_write(void *opaque, hwaddr offset, uint64_t value,
                             unsigned size)
 {
@@ -89,6 +138,11 @@ static void imx93_ccm_write(void *opaque, hwaddr offset, uint64_t value,
         return;
     }
     s->regs[offset / 4] = value;
+
+    /* A write to an audio root's CONTROL re-derives its output frequency. */
+    if (offset == CCM_ROOT_PDM || offset == CCM_ROOT_SPDIF) {
+        imx93_ccm_update_audio_clock(s, offset);
+    }
 }
 
 static const MemoryRegionOps imx93_ccm_ops = {
@@ -110,6 +164,11 @@ static void imx93_ccm_reset_hold(Object *obj, ResetType type)
     IMX93CCMState *s = IMX93_CCM(obj);
 
     memset(s->regs, 0, sizeof(s->regs));
+
+    /* CONTROL 0 -> mux osc_24m, DIV 0 -> the roots idle at 24 MHz (matches the
+     * guest clk_summary before any audio stream reprograms them). */
+    imx93_ccm_update_audio_clock(s, CCM_ROOT_PDM);
+    imx93_ccm_update_audio_clock(s, CCM_ROOT_SPDIF);
 }
 
 static void imx93_ccm_init(Object *obj)
@@ -119,6 +178,9 @@ static void imx93_ccm_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &imx93_ccm_ops, s,
                           TYPE_IMX93_CCM, IMX93_CCM_REG_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
+
+    s->pdm_root = qdev_init_clock_out(DEVICE(obj), "pdm_root");
+    s->spdif_root = qdev_init_clock_out(DEVICE(obj), "spdif_root");
 }
 
 static const VMStateDescription vmstate_imx93_ccm = {

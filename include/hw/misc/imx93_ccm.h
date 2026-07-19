@@ -12,13 +12,19 @@
  * root CONTROL and gate DIRECT registers, reports the per-root BUSY status
  * as always-idle so the driver's change-poll completes, and returns a
  * permissive AUTHEN (TrustZone non-secure + all domains whitelisted) so the
- * driver does not skip clocks. No real clock frequencies are produced.
+ * driver does not skip clocks.
+ *
+ * The audio clock roots (pdm_root, spdif_root) additionally produce a real
+ * output frequency, computed from their CONTROL register (source mux + /DIV)
+ * the way the guest programs it, so an audio device downstream can pace itself
+ * from the rate the driver actually set instead of a hardcoded one.
  */
 
 #ifndef IMX93_CCM_H
 #define IMX93_CCM_H
 
 #include "hw/core/sysbus.h"
+#include "hw/core/clock.h"
 #include "qom/object.h"
 #include "qemu/units.h"
 
@@ -34,6 +40,10 @@ struct IMX93CCMState {
 
     MemoryRegion iomem;
     uint32_t regs[IMX93_CCM_NUM_REGS];
+
+    /* Audio clock-root outputs, driven from their CONTROL register. */
+    Clock *pdm_root;
+    Clock *spdif_root;
 };
 
 #endif /* IMX93_CCM_H */

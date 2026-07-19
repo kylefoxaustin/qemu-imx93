@@ -65,6 +65,19 @@ if ! command -v "${CROSS}gcc" >/dev/null || [ -z "$LASOUND" ] || \
     exit 0
 fi
 
+# The capture oracle for the MICFIL (PDM) card - same toolchain/sysroot as the
+# playback one. Its job is to drive the MICFIL RX FIFO -> eDMA1 datapath AND to
+# make the model emit its capture-start trace, so run.sh can check the derived
+# sample rate tracks the requested one. If it will not build we drop the MICFIL
+# leg (the playback verdict still stands) rather than fake it.
+MICFIL_CAP=1
+if ! "${CROSS}gcc" -O2 -Wall -I"$ALSA_SYSROOT/usr/include" \
+        -o "$TMP/pcm_capture" "$HERE/pcm_capture.c" "$LASOUND" \
+        -Wl,--allow-shlib-undefined 2>/dev/null; then
+    echo "note: pcm_capture oracle did not build; skipping the MICFIL rate leg"
+    MICFIL_CAP=0
+fi
+
 #
 # The capture is NOT optional, and that is the point.
 #
@@ -95,16 +108,23 @@ fail() { echo "FAIL: $*"; echo "--- console tail ---"; tail -20 "$LOG"; exit 1; 
 
 for RATE in $RATES; do
     echo "$RATE" > "$TMP/rate"
-    ( cd "$TMP" && printf 'myinit\npcm_play\nrate\n' | cpio -o -H newc \
+    OVL='myinit\npcm_play\nrate\n'
+    [ "$MICFIL_CAP" = 1 ] && OVL="${OVL}pcm_capture\n"
+    ( cd "$TMP" && printf "$OVL" | cpio -o -H newc \
         2>/dev/null > overlay.cpio )
     cat "$BASE_INITRD" "$TMP/overlay.cpio" > "$TMP/combined.cpio.gz"
 
     WAV="$WAVDIR/capture-$RATE.wav"
     rm -f "$WAV"
+    TRACELOG="$TMP/trace-$RATE.log"
+    rm -f "$TRACELOG"
 
+    # -d trace:imx93_micfil_capture_start routes that one trace event to the -D
+    # file, so run.sh can read the sample rate the model derived from pdm_root.
     timeout -s KILL "${TMO:-240}" "$QEMU" -M imx93-11x11-evk -m 4G -display none \
         -audio "driver=wav,path=$WAV,out.frequency=$RATE" \
         -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/combined.cpio.gz" \
+        -D "$TRACELOG" -d trace:imx93_micfil_capture_start \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
         -serial "file:$LOG" -serial null >/dev/null 2>&1 || true
 
@@ -121,6 +141,19 @@ for RATE in $RATES; do
     # guest asked for).
     python3 "$HERE/check_wav.py" "$WAV" "$RATE" || \
         fail "[$RATE Hz] the captured samples are not the square wave that was played"
+
+    # MICFIL leg: the PDM capture path must actually deliver a non-silent signal,
+    # AND the rate the model derived from the CCM's pdm_root must equal ${RATE}.
+    # A hardcoded pacer emits the same number at 48 kHz and 16 kHz; this asks
+    # both questions, so it goes red if the MICFIL stops reading its clock.
+    if [ "$MICFIL_CAP" = 1 ]; then
+        grep -qE 'CAP\[hw:[0-9]+,0\]: PASS' "$LOG" || \
+            fail "[$RATE Hz] pcm_capture did not PASS (the MICFIL -> eDMA1 capture path delivered no signal)"
+        grep -qE "sample rate ${RATE} Hz" "$TRACELOG" || \
+            fail "[$RATE Hz] the MICFIL derived the wrong rate from pdm_root: $(grep -oE 'sample rate [0-9]+ Hz' "$TRACELOG" | tail -1)"
+    fi
 done
 
 echo "PASS: real PCM through wm8962/SAI3 -> eDMA3 cyclic, verified at $RATES Hz"
+[ "$MICFIL_CAP" = 1 ] && \
+    echo "PASS: MICFIL PDM capture -> eDMA1, sample rate derived from CCM pdm_root, verified at $RATES Hz"

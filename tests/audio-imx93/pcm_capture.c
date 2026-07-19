@@ -23,8 +23,9 @@
 int main(int argc, char **argv)
 {
     const char *dev = argc > 1 ? argv[1] : "hw:1,0";
-    unsigned int rate = 48000, chans = 2;
+    unsigned int chans = 2;
     unsigned int secs = argc > 2 ? atoi(argv[2]) : 1;
+    unsigned int rate = argc > 3 ? (unsigned int)atoi(argv[3]) : 48000;
     snd_pcm_t *pcm;
     int err, i, bytes = 2;
     long frames = (long)rate * secs;

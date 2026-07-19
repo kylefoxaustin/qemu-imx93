@@ -19,6 +19,7 @@
 #define IMX93_MICFIL_H
 
 #include "hw/core/sysbus.h"
+#include "hw/core/clock.h"
 #include "qom/object.h"
 #include "qemu/timer.h"
 
@@ -41,6 +42,8 @@ struct IMX93MicfilState {
     qemu_irq dma_req;           /* FIFO-has-data request to the eDMA */
     uint32_t regs[IMX93_MICFIL_REGS];
 
+    Clock *pdm_clk;             /* CCM pdm_root: the sample rate is pdm_clk/1024 */
+
     /* Synthesised capture FIFO drained via DATACH0. */
     QEMUTimer *rx_timer;
     uint32_t rx_fifo[IMX93_MICFIL_FIFO_DEPTH];
@@ -48,6 +51,7 @@ struct IMX93MicfilState {
     uint32_t rx_wptr;
     uint32_t rx_count;          /* words currently in the FIFO */
     uint64_t rx_words;          /* total samples clocked in (drives waveform) */
+    bool warned_no_clock;       /* logged the missing-PDM-clock guard once */
 };
 
 #endif /* IMX93_MICFIL_H */

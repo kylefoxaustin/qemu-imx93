@@ -38,6 +38,21 @@ if [ -x /pcm_play ]; then
         /pcm_play "hw:${CARD},0" 1 "$RATE"
     fi
 fi
+
+# PDM capture on the MICFIL card, at the SAME rate the harness chose. This is
+# what proves the MICFIL paces from the CCM's pdm_root: the fsl-micfil clk
+# driver programs pdm_root to RATE*1024, so the model's capture-start trace must
+# report a sample rate that TRACKS ${RATE} (16000 vs 48000), not a constant.
+if [ -x /pcm_capture ]; then
+    MIC=$(awk -F'[][ ]+' '/micfilaudio/ {print $2}' /proc/asound/cards | head -1)
+    RATE=$(cat /rate 2>/dev/null || echo 48000)
+    if [ -z "$MIC" ]; then
+        echo "CAPTURE: FAIL (no micfilaudio card in /proc/asound/cards)"
+    else
+        echo "=== CAPTURE on micfil (hw:${MIC},0) at ${RATE} Hz ==="
+        /pcm_capture "hw:${MIC},0" 1 "$RATE"
+    fi
+fi
 echo "=== AUDIO TEST DONE ==="
 # Power off rather than spin: QEMU writes the wav header on close, so a killed
 # QEMU leaves a truncated capture and the samples - which ARE the assertion -

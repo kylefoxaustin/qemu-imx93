@@ -1177,6 +1177,15 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
         qdev_connect_gpio_out_named(DEVICE(&s->sai[2]), "dma-req-rx", 0,
             qdev_get_gpio_in_named(DEVICE(&s->edma2), "dma-req", 0x3d));
 
+        /*
+         * Pace PDM capture from the CCM's pdm_root, not a hardcoded 48 kHz: the
+         * fsl-micfil driver programs pdm_root to rate * 1024, so the MICFIL
+         * derives the sample rate the guest actually asked for. The clock input
+         * must be connected before realize.
+         */
+        qdev_connect_clock_in(DEVICE(&s->micfil), "pdm_clk",
+            qdev_get_clock_out(DEVICE(&s->ccm), "pdm_root"));
+
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->micfil), errp)) {
             return;
         }

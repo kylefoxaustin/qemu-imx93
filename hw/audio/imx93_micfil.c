@@ -9,9 +9,13 @@
 #include "qemu/osdep.h"
 #include "hw/audio/imx93_micfil.h"
 #include "hw/core/irq.h"
+#include "hw/core/qdev-clock.h"
 #include "migration/vmstate.h"
+#include "qemu/host-utils.h"
+#include "qemu/log.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
+#include "trace.h"
 
 /* Register map */
 #define MICFIL_CTRL1    0x00    /* Control 1                */
@@ -29,6 +33,7 @@
 #define MICFIL_CTRL1_SRES       (1u << 27)  /* Software reset (self-clearing) */
 #define MICFIL_CTRL1_DISEL      (3u << 24)  /* DMA/IRQ select               */
 #define MICFIL_CTRL1_DISEL_DMA  (1u << 24)  /* DISEL == 01: DMA request      */
+#define MICFIL_CTRL1_CHEN       0xff        /* per-channel enables (7:0)     */
 
 #define MICFIL_FIFO_CTRL_FIFOWMK 0x1f       /* Watermark (bits 4:0)         */
 
@@ -70,10 +75,58 @@
 QEMU_BUILD_BUG_ON(MICFIL_ADVERTISED_DEPTH >
                   ARRAY_SIZE(((IMX93MicfilState *)0)->rx_fifo));
 
-/* MICFIL outputs ~48 kHz; one decimated sample per word period. */
-#define MICFIL_WORD_NS  (1000000000LL / 48000)
+/*
+ * The fsl-micfil driver sets the PDM master clock to rate * clk_div * osr * 8
+ * with clk_div = 8, osr = 16, i.e. mclk = rate * 1024 (fsl_micfil.c). So the
+ * captured sample rate is pdm_root / 1024 - it must follow the CCM clock the
+ * driver programmed, not a hardcoded 48 kHz (which plays every other rate at
+ * the wrong speed). And one shared FIFO serves all channels: with N channels
+ * enabled the eDMA pops N words per frame, so words must be clocked in at N x
+ * the frame rate or an N-channel capture runs N times too slow.
+ */
+#define MICFIL_MCLK_RATIO   1024
 
 #define R(s, off)   ((s)->regs[(off) >> 2])
+
+/*
+ * The sample rate the MICFIL captures at, derived from the CCM's pdm_root:
+ * mclk = rate * 1024, so rate = pdm_root / 1024. This is the single source of
+ * truth for pacing - the word timer AND the capture-start trace both read it,
+ * so the rate the model reports is exactly the rate it clocks at.
+ */
+static uint64_t imx93_micfil_rate(IMX93MicfilState *s)
+{
+    uint64_t mclk = s->pdm_clk ? clock_get_hz(s->pdm_clk) : 0;
+    uint64_t rate = mclk / MICFIL_MCLK_RATIO;
+
+    if (rate == 0) {
+        /*
+         * The CCM has not routed a real clock to us yet (pdm_root at its
+         * osc_24m idle gives 24 MHz / 1024 = a valid rate, so 0 only happens
+         * if the mux points at an unmodelled source). Say so once and pace at
+         * a sane default rather than schedule a zero-period timer that
+         * livelocks - a clock that is not running must not run infinitely fast.
+         */
+        if (!s->warned_no_clock) {
+            s->warned_no_clock = true;
+            qemu_log_mask(LOG_GUEST_ERROR, "imx93-micfil: no PDM clock from the "
+                          "CCM; pacing at 48 kHz\n");
+        }
+        rate = 48000;
+    }
+    return rate;
+}
+
+/* Nanoseconds between clocked-in words: (1 / (rate * channels)). */
+static int64_t imx93_micfil_word_ns(IMX93MicfilState *s)
+{
+    uint32_t chans = ctpop32(R(s, MICFIL_CTRL1) & MICFIL_CTRL1_CHEN);
+
+    if (chans == 0) {
+        chans = 1;
+    }
+    return NANOSECONDS_PER_SECOND / (int64_t)(imx93_micfil_rate(s) * chans);
+}
 
 /* The module clocks samples in once enabled and not disabled. */
 static bool imx93_micfil_running(IMX93MicfilState *s)
@@ -132,7 +185,7 @@ static void imx93_micfil_rx_tick(void *opaque)
     }
 
     timer_mod(s->rx_timer,
-              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + MICFIL_WORD_NS);
+              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + imx93_micfil_word_ns(s));
 }
 
 static uint64_t imx93_micfil_read(void *opaque, hwaddr offset, unsigned size)
@@ -200,9 +253,20 @@ static void imx93_micfil_write(void *opaque, hwaddr offset, uint64_t value,
 
         now_running = imx93_micfil_running(s);
         if (now_running && !was_running) {
+            uint64_t hz = s->pdm_clk ? clock_get_hz(s->pdm_clk) : 0;
+
             imx93_micfil_rx_reset(s);
+            /*
+             * Report the rate we derived from the CCM's pdm_root as capture
+             * starts. This is the whole point of taking a real clock input: at
+             * 16 kHz the guest programs pdm_root to 16.384 MHz, at 48 kHz to
+             * 49.152 MHz, and the trace tracks it - a hardcoded pacer would
+             * emit the same number regardless. imx93_micfil_rate() is the same
+             * value the word timer paces at, so the trace cannot drift from it.
+             */
+            trace_imx93_micfil_capture_start(hz, imx93_micfil_rate(s));
             timer_mod(s->rx_timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + MICFIL_WORD_NS);
+                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + imx93_micfil_word_ns(s));
         } else if (!now_running && was_running) {
             timer_del(s->rx_timer);
             imx93_micfil_rx_reset(s);
@@ -250,6 +314,18 @@ static void imx93_micfil_realize(DeviceState *dev, Error **errp)
     s->rx_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, imx93_micfil_rx_tick, s);
 }
 
+static void imx93_micfil_init(Object *obj)
+{
+    IMX93MicfilState *s = IMX93_MICFIL(obj);
+
+    /*
+     * The PDM sample-rate clock is an input driven by the CCM's pdm_root. It
+     * must exist before the board wires it, so create it in instance_init -
+     * qdev_connect_clock_in() asserts the device is not yet realized.
+     */
+    s->pdm_clk = qdev_init_clock_in(DEVICE(obj), "pdm_clk", NULL, NULL, 0);
+}
+
 static const VMStateDescription vmstate_imx93_micfil = {
     .name = TYPE_IMX93_MICFIL,
     .version_id = 2,
@@ -282,6 +358,7 @@ static const TypeInfo imx93_micfil_types[] = {
         .name = TYPE_IMX93_MICFIL,
         .parent = TYPE_SYS_BUS_DEVICE,
         .instance_size = sizeof(IMX93MicfilState),
+        .instance_init = imx93_micfil_init,
         .class_init = imx93_micfil_class_init,
     },
 };
