@@ -78,6 +78,18 @@ if ! "${CROSS}gcc" -O2 -Wall -I"$ALSA_SYSROOT/usr/include" \
     MICFIL_CAP=0
 fi
 
+# The SPDIF player for the XCVR card - same toolchain. Drives the XCVR TX FIFO
+# -> eDMA2 datapath and makes the model emit its TX-start trace, so run.sh can
+# check the sample rate derived from spdif_root tracks the requested one. If it
+# will not build, drop the SPDIF leg rather than fake it.
+XCVR_TX=1
+if ! "${CROSS}gcc" -O2 -Wall -I"$ALSA_SYSROOT/usr/include" \
+        -o "$TMP/spdif_play" "$HERE/spdif_play.c" "$LASOUND" \
+        -Wl,--allow-shlib-undefined 2>/dev/null; then
+    echo "note: spdif_play oracle did not build; skipping the XCVR rate leg"
+    XCVR_TX=0
+fi
+
 #
 # The capture is NOT optional, and that is the point.
 #
@@ -101,6 +113,11 @@ fi
 # its tone transposed from 145 Hz back up to 436 Hz.
 #
 RATES=${RATES:-"48000 16000"}
+# The XCVR/SPDIF leg runs on its own boots: its PCM floor is 32 kHz (so it
+# cannot share the 16 kHz SAI/MICFIL rate), and driving it spdif-only keeps the
+# unrelated SAI/wm8962 datapath out of its verdict. Two in-range, distinct rates
+# make a hardcoded SPDIF pacer detectable.
+SPDIF_RATES=${SPDIF_RATES:-"48000 32000"}
 LOG=$TMP/console.log
 WAVDIR=${WAVDIR:-$TMP}
 
@@ -119,12 +136,13 @@ for RATE in $RATES; do
     TRACELOG="$TMP/trace-$RATE.log"
     rm -f "$TRACELOG"
 
-    # -d trace:imx93_micfil_capture_start routes that one trace event to the -D
-    # file, so run.sh can read the sample rate the model derived from pdm_root.
+    # Route the audio-root rate traces to the -D file so run.sh can read the
+    # sample rate each model derived from its CCM clock (pdm_root / spdif_root).
     timeout -s KILL "${TMO:-240}" "$QEMU" -M imx93-11x11-evk -m 4G -display none \
         -audio "driver=wav,path=$WAV,out.frequency=$RATE" \
         -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/combined.cpio.gz" \
-        -D "$TRACELOG" -d trace:imx93_micfil_capture_start \
+        -D "$TRACELOG" \
+        -d trace:imx93_micfil_capture_start,trace:imx93_xcvr_tx_start \
         -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
         -serial "file:$LOG" -serial null >/dev/null 2>&1 || true
 
@@ -149,11 +167,41 @@ for RATE in $RATES; do
     if [ "$MICFIL_CAP" = 1 ]; then
         grep -qE 'CAP\[hw:[0-9]+,0\]: PASS' "$LOG" || \
             fail "[$RATE Hz] pcm_capture did not PASS (the MICFIL -> eDMA1 capture path delivered no signal)"
-        grep -qE "sample rate ${RATE} Hz" "$TRACELOG" || \
-            fail "[$RATE Hz] the MICFIL derived the wrong rate from pdm_root: $(grep -oE 'sample rate [0-9]+ Hz' "$TRACELOG" | tail -1)"
+        # Grep the pdm_root prefix, not a bare "sample rate", so the XCVR's own
+        # rate trace can never satisfy the MICFIL assertion by accident.
+        grep -qE "pdm_root [0-9]+ Hz -> sample rate ${RATE} Hz" "$TRACELOG" || \
+            fail "[$RATE Hz] the MICFIL derived the wrong rate from pdm_root: $(grep -oE 'pdm_root.*sample rate [0-9]+ Hz' "$TRACELOG" | tail -1)"
     fi
 done
 
 echo "PASS: real PCM through wm8962/SAI3 -> eDMA3 cyclic, verified at $RATES Hz"
 [ "$MICFIL_CAP" = 1 ] && \
     echo "PASS: MICFIL PDM capture -> eDMA1, sample rate derived from CCM pdm_root, verified at $RATES Hz"
+
+# ---------------------------------------------------------------------------
+# XCVR / SPDIF leg: own spdif-only boots, so the wm8962/SAI datapath does not
+# color the verdict and the two in-range rates (48 k, 32 k) can catch a pacer
+# that stopped reading spdif_root.
+# ---------------------------------------------------------------------------
+if [ "$XCVR_TX" = 1 ]; then
+    for RATE in $SPDIF_RATES; do
+        echo "$RATE" > "$TMP/rate"
+        : > "$TMP/spdif_only"
+        ( cd "$TMP" && printf 'myinit\nspdif_play\nrate\nspdif_only\n' | \
+            cpio -o -H newc 2>/dev/null > overlay.cpio )
+        cat "$BASE_INITRD" "$TMP/overlay.cpio" > "$TMP/combined.cpio.gz"
+        TRACELOG="$TMP/trace-spdif-$RATE.log"; rm -f "$TRACELOG"
+
+        timeout -s KILL "${TMO:-240}" "$QEMU" -M imx93-11x11-evk -m 4G -display none \
+            -kernel "$KERNEL" -dtb "$DTB" -initrd "$TMP/combined.cpio.gz" \
+            -D "$TRACELOG" -d trace:imx93_xcvr_tx_start \
+            -append "console=ttyLP0,115200 cpuidle.off=1 rdinit=/myinit ignore_loglevel" \
+            -serial "file:$LOG" -serial null >/dev/null 2>&1 || true
+
+        grep -qE 'SPDIF\[hw:[0-9]+,0\]: PASS' "$LOG" || \
+            fail "[SPDIF $RATE Hz] spdif_play did not PASS (the XCVR -> eDMA2 TX path did not drain the stream)"
+        grep -qE "spdif_root [0-9]+ Hz -> sample rate ${RATE} Hz" "$TRACELOG" || \
+            fail "[SPDIF $RATE Hz] the XCVR derived the wrong rate from spdif_root: $(grep -oE 'spdif_root.*sample rate [0-9]+ Hz' "$TRACELOG" | tail -1)"
+    done
+    echo "PASS: XCVR SPDIF TX -> eDMA2, sample rate derived from CCM spdif_root, verified at $SPDIF_RATES Hz"
+fi

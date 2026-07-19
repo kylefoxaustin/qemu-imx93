@@ -20,6 +20,7 @@
 #define HW_AUDIO_IMX93_XCVR_H
 
 #include "hw/core/sysbus.h"
+#include "hw/core/clock.h"
 #include "qom/object.h"
 #include "qemu/timer.h"
 #include "qemu/audio.h"
@@ -40,6 +41,8 @@ struct IMX93XcvrState {
     MemoryRegion iomem;
     qemu_irq irq;
     qemu_irq dma_req;           /* TX FIFO-needs-data request to the eDMA */
+    Clock *spdif_clk;           /* CCM spdif_root: TX Fs = spdif_root / ratio */
+    bool warned_no_clock;       /* logged the missing-SPDIF-clock guard once */
     uint32_t regs[IMX93_XCVR_NUM_REGS];
     uint8_t ram[IMX93_XCVR_RAM_SIZE];
     uint32_t ai_sub[256];   /* PHY/PLL sub-registers via the AI interface */

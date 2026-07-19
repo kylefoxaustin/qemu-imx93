@@ -64,3 +64,6 @@ virtio_snd_handle_rx_xfer(void) "rx queue callback called"
 
 # imx93_micfil.c
 imx93_micfil_capture_start(uint64_t pdm_hz, uint64_t rate_hz) "pdm_root %"PRIu64" Hz -> sample rate %"PRIu64" Hz"
+
+# imx93_xcvr.c
+imx93_xcvr_tx_start(uint64_t spdif_hz, uint64_t rate_hz) "spdif_root %"PRIu64" Hz -> sample rate %"PRIu64" Hz"

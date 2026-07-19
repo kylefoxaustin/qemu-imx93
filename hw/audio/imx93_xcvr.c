@@ -17,8 +17,11 @@
 #include "qemu/osdep.h"
 #include "hw/audio/imx93_xcvr.h"
 #include "hw/core/irq.h"
+#include "hw/core/qdev-clock.h"
 #include "migration/vmstate.h"
+#include "qemu/log.h"
 #include "qemu/module.h"
+#include "trace.h"
 
 #define XCVR_VERSION        0x00
 #define XCVR_PHY_AI_CTRL    0x90
@@ -46,8 +49,49 @@
 #define EXT_CTRL_SPDIF_MODE     (1u << 23)  /* SPDIF mode selected          */
 #define EXT_CTRL_TX_FWM_MASK    0x7f        /* TX FIFO watermark [6:0]     */
 
-/* SPDIF stereo: 2 ch x 48 kHz = 96000 words/s. */
-#define XCVR_TX_WORD_NS (NANOSECONDS_PER_SECOND / 96000)
+/* SPDIF stereo: 2 channels per frame. */
+#define XCVR_TX_CHANNELS    2
+/*
+ * Ratio between the CCM spdif_root clock and the SPDIF sample rate Fs, i.e.
+ * spdif_root = Fs * XCVR_SPDIF_RATIO, so Fs = spdif_root / XCVR_SPDIF_RATIO.
+ *
+ * MEASURED on the guest (clk_summary, with an IEC958 stream actually running):
+ * the fsl_xcvr driver sets spdif_root to 6.144 MHz for a 48 kHz stream and
+ * 4.096 MHz for 32 kHz - a ratio of 128 in both cases. 128 is the SPDIF biphase
+ * clock: 64 bits per frame (two 32-bit subframes) x 2 transitions per bit for
+ * biphase-mark. Note the idle root reads 12.288 MHz (256 x 48 kHz); the driver
+ * halves it once a stream prepares, which is why the ratio has to be read off a
+ * running stream and not the reset value.
+ */
+#define XCVR_SPDIF_RATIO    128
+
+/*
+ * SPDIF sample rate, derived from the CCM's spdif_root rather than a hardcoded
+ * 48 kHz. Falls back to 48 kHz (logged once) if the CCM has not routed a real
+ * clock, so the word timer never gets a zero period.
+ */
+static uint64_t xcvr_spdif_rate(IMX93XcvrState *s)
+{
+    uint64_t hz = s->spdif_clk ? clock_get_hz(s->spdif_clk) : 0;
+    uint64_t rate = hz / XCVR_SPDIF_RATIO;
+
+    if (rate == 0) {
+        if (!s->warned_no_clock) {
+            s->warned_no_clock = true;
+            qemu_log_mask(LOG_GUEST_ERROR, "imx93-xcvr: no SPDIF clock from the "
+                          "CCM; pacing at 48 kHz\n");
+        }
+        rate = 48000;
+    }
+    return rate;
+}
+
+/* Nanoseconds between clocked-out words: 1 / (Fs * channels). */
+static int64_t xcvr_tx_word_ns(IMX93XcvrState *s)
+{
+    return NANOSECONDS_PER_SECOND /
+           (int64_t)(xcvr_spdif_rate(s) * XCVR_TX_CHANNELS);
+}
 
 /* TX clocks once SPDIF mode is on, the datapath released and DMA enabled. */
 static bool xcvr_tx_active(IMX93XcvrState *s)
@@ -126,7 +170,7 @@ static void xcvr_tx_tick(void *opaque)
         qemu_irq_pulse(s->dma_req);
     }
     timer_mod(s->tx_timer,
-              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + XCVR_TX_WORD_NS);
+              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + xcvr_tx_word_ns(s));
 }
 
 /* Perform the indirect PHY/PLL access and acknowledge it via the DONE bits. */
@@ -248,9 +292,15 @@ static void xcvr_write(void *opaque, hwaddr offset, uint64_t value,
         bool active = xcvr_tx_active(s);
 
         if (active && !timer_pending(s->tx_timer)) {
+            uint64_t hz = s->spdif_clk ? clock_get_hz(s->spdif_clk) : 0;
+
             xcvr_voice_set(s, true);
+            /* Report the rate we derived from spdif_root as TX starts (the same
+             * value the word timer paces at), so a harness can check it tracks
+             * the requested Fs instead of a constant. */
+            trace_imx93_xcvr_tx_start(hz, xcvr_spdif_rate(s));
             timer_mod(s->tx_timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + XCVR_TX_WORD_NS);
+                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + xcvr_tx_word_ns(s));
         } else if (!active && timer_pending(s->tx_timer)) {
             timer_del(s->tx_timer);
             xcvr_voice_set(s, false);
@@ -278,6 +328,18 @@ static void xcvr_reset(DeviceState *dev)
     s->tx_words = 0;
     s->cap_head = s->cap_count = 0;
     xcvr_voice_set(s, false);
+}
+
+static void xcvr_init(Object *obj)
+{
+    IMX93XcvrState *s = IMX93_XCVR(obj);
+
+    /*
+     * The SPDIF sample-rate clock is an input driven by the CCM's spdif_root.
+     * It must exist before the board wires it, so create it in instance_init -
+     * qdev_connect_clock_in() asserts the device is not yet realized.
+     */
+    s->spdif_clk = qdev_init_clock_in(DEVICE(obj), "spdif_clk", NULL, NULL, 0);
 }
 
 static void xcvr_realize(DeviceState *dev, Error **errp)
@@ -336,6 +398,7 @@ static const TypeInfo xcvr_types[] = {
         .name = TYPE_IMX93_XCVR,
         .parent = TYPE_SYS_BUS_DEVICE,
         .instance_size = sizeof(IMX93XcvrState),
+        .instance_init = xcvr_init,
         .class_init = xcvr_class_init,
     },
 };

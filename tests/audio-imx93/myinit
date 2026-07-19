@@ -9,9 +9,9 @@ PATH=/sbin:/usr/sbin:/bin:/usr/bin; export PATH
 /bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null
 
 echo "=== AUDIO: loading SAI/codec drivers ==="
-for m in snd-soc-fsl-utils snd-soc-fsl-sai snd-soc-fsl-micfil imx-pcm-dma \
-         snd-soc-wm8962 snd-soc-dmic snd-soc-imx-card snd-soc-fsl-asoc-card \
-         snd-soc-simple-card snd-soc-simple-card-utils; do
+for m in snd-soc-fsl-utils snd-soc-fsl-sai snd-soc-fsl-micfil snd-soc-fsl-xcvr \
+         imx-pcm-dma snd-soc-wm8962 snd-soc-dmic snd-soc-imx-card \
+         snd-soc-fsl-asoc-card snd-soc-simple-card snd-soc-simple-card-utils; do
     /sbin/modprobe "$m" 2>&1 | sed "s/^/modprobe $m: /"
 done
 sleep 3
@@ -21,16 +21,22 @@ cat /proc/asound/cards 2>/dev/null
 echo "=== /proc/asound/pcm ==="
 cat /proc/asound/pcm 2>/dev/null
 
-if [ -x /pcm_play ]; then
+# The SPDIF leg boots spdif-only (a /spdif_only marker in the overlay): the
+# wm8962/SAI and MICFIL datapaths are skipped so they cannot color the SPDIF
+# verdict, and the XCVR is exercised on its own.
+SPDIF_ONLY=0
+[ -f /spdif_only ] && SPDIF_ONLY=1
+# The rate is chosen by the harness, not baked in: a datapath that assumes one
+# rate is invisible to a test that only ever asks for that rate.
+RATE=$(cat /rate 2>/dev/null || echo 48000)
+
+if [ "$SPDIF_ONLY" = 0 ] && [ -x /pcm_play ]; then
     # Find the wm8962 card by NAME. Card indices are assigned by the kernel in
     # registration order, so they move: MICFIL registering shifted wm8962 from
     # card 1 to card 2, and a test hardcoding hw:1,0 then played into a
     # capture-only device and failed to open - silently, for as long as nobody
     # read the console. An index is not an identity.
     CARD=$(awk -F'[][ ]+' '/wm8962audio/ {print $2}' /proc/asound/cards | head -1)
-    # The rate is chosen by the harness, not baked in: a SAI that assumes one
-    # rate is invisible to a test that only ever asks for that rate.
-    RATE=$(cat /rate 2>/dev/null || echo 48000)
     if [ -z "$CARD" ]; then
         echo "PLAY: FAIL (no wm8962audio card in /proc/asound/cards)"
     else
@@ -43,14 +49,27 @@ fi
 # what proves the MICFIL paces from the CCM's pdm_root: the fsl-micfil clk
 # driver programs pdm_root to RATE*1024, so the model's capture-start trace must
 # report a sample rate that TRACKS ${RATE} (16000 vs 48000), not a constant.
-if [ -x /pcm_capture ]; then
+if [ "$SPDIF_ONLY" = 0 ] && [ -x /pcm_capture ]; then
     MIC=$(awk -F'[][ ]+' '/micfilaudio/ {print $2}' /proc/asound/cards | head -1)
-    RATE=$(cat /rate 2>/dev/null || echo 48000)
     if [ -z "$MIC" ]; then
         echo "CAPTURE: FAIL (no micfilaudio card in /proc/asound/cards)"
     else
         echo "=== CAPTURE on micfil (hw:${MIC},0) at ${RATE} Hz ==="
         /pcm_capture "hw:${MIC},0" 1 "$RATE"
+    fi
+fi
+
+# SPDIF playback on the XCVR card. The XCVR PCM only accepts 32 kHz..192 kHz
+# IEC958, so this leg runs only when the harness picks a rate in range; there
+# the fsl_xcvr driver programs spdif_root to RATE*128 and the model's TX-start
+# trace must report a sample rate that TRACKS ${RATE}, not a constant.
+if [ -x /spdif_play ] && [ "${RATE:-0}" -ge 32000 ]; then
+    XC=$(awk -F'[][ ]+' '/imxaudioxcvr/ {print $2}' /proc/asound/cards | head -1)
+    if [ -z "$XC" ]; then
+        echo "SPDIF: FAIL (no imxaudioxcvr card in /proc/asound/cards)"
+    else
+        echo "=== SPDIF PLAY on xcvr (hw:${XC},0) at ${RATE} Hz ==="
+        /spdif_play "hw:${XC},0" "$RATE"
     fi
 fi
 echo "=== AUDIO TEST DONE ==="

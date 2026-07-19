@@ -1360,6 +1360,13 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
     }
 
     /* XCVR SPDIF audio transceiver (registration model). */
+    /*
+     * Pace SPDIF TX from the CCM's spdif_root, not a hardcoded 48 kHz: the
+     * fsl_xcvr driver programs spdif_root from the requested Fs, so the XCVR
+     * derives the sample rate the guest asked for. Connect before realize.
+     */
+    qdev_connect_clock_in(DEVICE(&s->xcvr), "spdif_clk",
+        qdev_get_clock_out(DEVICE(&s->ccm), "spdif_root"));
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->xcvr), errp)) {
         return;
     }
