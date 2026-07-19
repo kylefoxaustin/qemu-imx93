@@ -15,6 +15,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/timer/imx93_tpm.h"
+#include "hw/core/qdev-clock.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
@@ -34,19 +35,49 @@
 
 #define TPM_CLK_HZ  24000000    /* nominal module clock */
 
+/*
+ * Effective module-clock rate. When a CCM LPCG clock is wired to this TPM
+ * (TPM2 in this SoC), the counter runs at whatever that gated clock delivers -
+ * 0 when the guest clears the gate. TPMs with no modelled gate fall back to the
+ * nominal rate so their counters are unchanged.
+ */
+static uint32_t tpm_hz(IMX93TpmState *s)
+{
+    return clock_has_source(s->clk) ? clock_get_hz(s->clk) : TPM_CLK_HZ;
+}
+
 static uint32_t tpm_count(IMX93TpmState *s)
 {
-    uint64_t ticks, period;
+    uint64_t delta, period;
     uint32_t ps;
 
     if (!(s->sc & SC_CMOD)) {
         return 0;               /* counter disabled */
     }
     ps = s->sc & SC_PS;
-    ticks = muldiv64(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) - s->base_ns,
-                     TPM_CLK_HZ, NANOSECONDS_PER_SECOND) >> ps;
+    delta = muldiv64(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) - s->base_ns,
+                     tpm_hz(s), NANOSECONDS_PER_SECOND) >> ps;
     period = (s->mod & 0xffff) + 1;
-    return ticks % period;
+    return (s->cnt_base + delta) % period;
+}
+
+/*
+ * Snapshot the running count and rebase to now. Called before anything that
+ * changes the effective rate (a clock-gate change, a prescaler/enable write) so
+ * the counter carries its value across the change instead of restarting - which
+ * is what makes gating freeze-and-hold: while the gate is clear the rate is 0,
+ * delta stays 0, and the count holds at cnt_base until the gate returns.
+ */
+static void tpm_settle(IMX93TpmState *s)
+{
+    s->cnt_base = tpm_count(s);
+    s->base_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+}
+
+/* The CCM LPCG gate is about to change the clock: settle at the old rate. */
+static void tpm_clk_update(void *opaque, ClockEvent event)
+{
+    tpm_settle(opaque);
 }
 
 static uint64_t tpm_read(void *opaque, hwaddr offset, unsigned size)
@@ -88,20 +119,24 @@ static void tpm_write(void *opaque, hwaddr offset, uint64_t value,
             s->mod = 0;
             memset(s->cnsc, 0, sizeof(s->cnsc));
             memset(s->cnv, 0, sizeof(s->cnv));
+            s->cnt_base = 0;
             s->base_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
         }
         break;
     case TPM_SC:
-        /* Restart the counter timebase when the clock is (re)enabled. */
+        /* Settle at the old rate, then apply the new prescaler/enable. */
+        tpm_settle(s);
         if ((value & SC_CMOD) && !(s->sc & SC_CMOD)) {
-            s->base_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+            s->cnt_base = 0;    /* a fresh enable starts the count at 0 */
         }
         s->sc = value;
         break;
     case TPM_CNT:
-        s->base_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);  /* write resets */
+        s->cnt_base = 0;        /* any write resets the counter to 0 */
+        s->base_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
         break;
     case TPM_MOD:
+        tpm_settle(s);          /* fold the running count under the old period */
         s->mod = value;
         break;
     default:
@@ -139,7 +174,22 @@ static void tpm_reset_hold(Object *obj, ResetType type)
     s->mod = 0;
     memset(s->cnsc, 0, sizeof(s->cnsc));
     memset(s->cnv, 0, sizeof(s->cnv));
+    s->cnt_base = 0;
     s->base_ns = 0;
+}
+
+static void tpm_init(Object *obj)
+{
+    IMX93TpmState *s = IMX93_TPM(obj);
+
+    /*
+     * The module clock is an input the CCM drives, gated by this TPM's LPCG.
+     * Create it in instance_init so the board can connect it before realize;
+     * ClockPreUpdate lets the counter settle at the old rate before the gate
+     * change takes effect.
+     */
+    s->clk = qdev_init_clock_in(DEVICE(obj), "clk", tpm_clk_update, s,
+                                ClockPreUpdate);
 }
 
 static void tpm_realize(DeviceState *dev, Error **errp)
@@ -153,10 +203,12 @@ static void tpm_realize(DeviceState *dev, Error **errp)
 
 static const VMStateDescription vmstate_tpm = {
     .name = TYPE_IMX93_TPM,
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = (const VMStateField[]) {
+        VMSTATE_CLOCK(clk, IMX93TpmState),
         VMSTATE_INT64(base_ns, IMX93TpmState),
+        VMSTATE_UINT32(cnt_base, IMX93TpmState),
         VMSTATE_UINT32(sc, IMX93TpmState),
         VMSTATE_UINT32(mod, IMX93TpmState),
         VMSTATE_UINT32_ARRAY(cnsc, IMX93TpmState, IMX93_TPM_CHANNELS),
@@ -181,6 +233,7 @@ static const TypeInfo tpm_types[] = {
         .name = TYPE_IMX93_TPM,
         .parent = TYPE_SYS_BUS_DEVICE,
         .instance_size = sizeof(IMX93TpmState),
+        .instance_init = tpm_init,
         .class_init = tpm_class_init,
     },
 };

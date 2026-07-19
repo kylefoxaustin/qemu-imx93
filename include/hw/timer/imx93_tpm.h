@@ -10,6 +10,7 @@
 #define HW_TIMER_IMX93_TPM_H
 
 #include "hw/core/sysbus.h"
+#include "hw/core/clock.h"
 #include "qom/object.h"
 
 #define TYPE_IMX93_TPM "imx93.tpm"
@@ -22,7 +23,9 @@ struct IMX93TpmState {
     SysBusDevice parent_obj;
 
     MemoryRegion iomem;
-    int64_t base_ns;        /* virtual time at which the counter last started */
+    Clock *clk;             /* module clock; gated by the CCM LPCG (0 = frozen) */
+    int64_t base_ns;        /* virtual time of the last counter settle */
+    uint32_t cnt_base;      /* counter value at base_ns (carries across gating) */
     uint32_t sc;            /* status/control (clock mode + prescaler) */
     uint32_t mod;           /* modulo (period) */
     uint32_t cnsc[IMX93_TPM_CHANNELS];

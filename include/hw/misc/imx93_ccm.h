@@ -44,6 +44,9 @@ struct IMX93CCMState {
     /* Audio clock-root outputs, driven from their CONTROL register. */
     Clock *pdm_root;
     Clock *spdif_root;
+
+    /* TPM2 module clock, gated by its LPCG DIRECT bit (0 = block frozen). */
+    Clock *tpm2_clk;
 };
 
 #endif /* IMX93_CCM_H */

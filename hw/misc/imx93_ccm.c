@@ -52,6 +52,19 @@
 #define CCM_ROOT_SPDIF      0x2a80
 
 /*
+ * LPCG (Low-Power Clock Gating) DIRECT register for TPM2. Per the i.MX93 RM,
+ * offset 0x8B40 is LPCG45_DIRECT (reset 0x0000_0001, i.e. the gate is ON out of
+ * reset) and LPCG45 gates the tpm2 functional clock - the same offset the
+ * Linux clk-imx93 driver uses for the TPM2 gate. Bit 0 is the enable. This is
+ * the worked example of an LPCG whose gating actually reaches its consumer; the
+ * pattern generalises to LPCG44/46..49 for the other TPMs.
+ */
+#define CCM_LPCG_TPM2       0x8b40
+#define CCM_LPCG_ON         0x1
+/* Nominal tpm2 functional clock when the gate is open (matches the TPM model). */
+#define CCM_TPM2_HZ         24000000
+
+/*
  * pdm_root and spdif_root select their source with AUDIO_SEL (clk-imx93
  * parent_names[AUDIO_SEL]): osc_24m, audio_pll, video_pll, clk_ext1. The audio
  * path uses osc_24m at idle and audio_pll when a stream runs; the driver never
@@ -128,6 +141,15 @@ static void imx93_ccm_update_audio_clock(IMX93CCMState *s, hwaddr control_off)
     }
 }
 
+/* Drive the TPM2 module clock from its LPCG gate: 24 MHz when open, else 0. */
+static void imx93_ccm_update_tpm2_gate(IMX93CCMState *s)
+{
+    bool on = s->regs[CCM_LPCG_TPM2 / 4] & CCM_LPCG_ON;
+
+    clock_set_hz(s->tpm2_clk, on ? CCM_TPM2_HZ : 0);
+    clock_propagate(s->tpm2_clk);
+}
+
 static void imx93_ccm_write(void *opaque, hwaddr offset, uint64_t value,
                             unsigned size)
 {
@@ -142,6 +164,10 @@ static void imx93_ccm_write(void *opaque, hwaddr offset, uint64_t value,
     /* A write to an audio root's CONTROL re-derives its output frequency. */
     if (offset == CCM_ROOT_PDM || offset == CCM_ROOT_SPDIF) {
         imx93_ccm_update_audio_clock(s, offset);
+    }
+    /* Clearing/setting the TPM2 LPCG DIRECT gates/ungates its module clock. */
+    if (offset == CCM_LPCG_TPM2) {
+        imx93_ccm_update_tpm2_gate(s);
     }
 }
 
@@ -169,6 +195,10 @@ static void imx93_ccm_reset_hold(Object *obj, ResetType type)
      * guest clk_summary before any audio stream reprograms them). */
     imx93_ccm_update_audio_clock(s, CCM_ROOT_PDM);
     imx93_ccm_update_audio_clock(s, CCM_ROOT_SPDIF);
+
+    /* LPCG45_DIRECT resets to 0x1 (RM): TPM2 comes up clocked. */
+    s->regs[CCM_LPCG_TPM2 / 4] = CCM_LPCG_ON;
+    imx93_ccm_update_tpm2_gate(s);
 }
 
 static void imx93_ccm_init(Object *obj)
@@ -181,6 +211,7 @@ static void imx93_ccm_init(Object *obj)
 
     s->pdm_root = qdev_init_clock_out(DEVICE(obj), "pdm_root");
     s->spdif_root = qdev_init_clock_out(DEVICE(obj), "spdif_root");
+    s->tpm2_clk = qdev_init_clock_out(DEVICE(obj), "tpm2_clk");
 }
 
 static const VMStateDescription vmstate_imx93_ccm = {
