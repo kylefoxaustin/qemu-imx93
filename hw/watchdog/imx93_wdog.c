@@ -38,7 +38,17 @@
 #define UNLOCK      0xd928c520u
 #define REFRESH     0xb480a602u
 
-#define WDOG_HZ     1000        /* LPO clock */
+/*
+ * LPO clock feeding the counter. The imx7ulp/imx8ulp variants run the counter
+ * at 1 kHz with no prescaler; the i.MX 93 runs a 32 kHz LPO and the driver
+ * ALWAYS enables the /256 prescaler (imx7ulp_wdt.c: imx93_wdt_hw has
+ * prescaler_enable=true, wdog_clock_rate=125). So it programs TOVAL = 125 *
+ * seconds, expecting the counter to tick at 32000/256 = 125 Hz. With the
+ * imx7ulp value of 1000 the prescaled rate was 1000/256 ≈ 3.9 Hz, so a 60 s
+ * watchdog only fired after ~32 minutes - the counter, not the timeout, was 42x
+ * off. 32000 makes the prescaled rate exactly the 125 Hz the driver assumes.
+ */
+#define WDOG_HZ     32000       /* 32 kHz LPO; /256 prescaler -> 125 Hz (imx93) */
 
 static uint32_t wdog_rate(IMX93WdogState *s)
 {
