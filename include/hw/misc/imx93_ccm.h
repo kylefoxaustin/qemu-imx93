@@ -45,8 +45,9 @@ struct IMX93CCMState {
     Clock *pdm_root;
     Clock *spdif_root;
 
-    /* TPM2 module clock, gated by its LPCG DIRECT bit (0 = block frozen). */
-    Clock *tpm2_clk;
+    /* Per-TPM module clocks (TPM1..6), each gated by its own LPCG DIRECT bit
+     * (0 = that block's clock is frozen). */
+    Clock *tpm_clk[6];
 };
 
 #endif /* IMX93_CCM_H */

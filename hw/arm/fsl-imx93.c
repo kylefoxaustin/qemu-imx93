@@ -1319,15 +1319,14 @@ static void fsl_imx93_realize(DeviceState *dev, Error **errp)
     /* TPM1-6: timer / PWM modules. */
     for (i = 0; i < 6; i++) {
         /*
-         * TPM2 (index 1) takes its module clock from the CCM's LPCG-gated
-         * tpm2_clk output, so clearing the TPM2 gate actually freezes the
-         * counter. Connect before realize. The other TPMs keep their nominal
-         * clock (their gates are not modelled).
+         * Each TPM takes its module clock from the CCM's LPCG-gated tpmN_clk
+         * output (LPCG44..49), so clearing a TPM's gate freezes that counter.
+         * Connect before realize.
          */
-        if (i == 1) {
-            qdev_connect_clock_in(DEVICE(&s->tpm[i]), "clk",
-                qdev_get_clock_out(DEVICE(&s->ccm), "tpm2_clk"));
-        }
+        g_autofree char *tpm_clk = g_strdup_printf("tpm%d_clk", i + 1);
+
+        qdev_connect_clock_in(DEVICE(&s->tpm[i]), "clk",
+            qdev_get_clock_out(DEVICE(&s->ccm), tpm_clk));
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->tpm[i]), errp)) {
             return;
         }

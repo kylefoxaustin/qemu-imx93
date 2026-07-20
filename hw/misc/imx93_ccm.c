@@ -52,17 +52,25 @@
 #define CCM_ROOT_SPDIF      0x2a80
 
 /*
- * LPCG (Low-Power Clock Gating) DIRECT register for TPM2. Per the i.MX93 RM,
- * offset 0x8B40 is LPCG45_DIRECT (reset 0x0000_0001, i.e. the gate is ON out of
- * reset) and LPCG45 gates the tpm2 functional clock - the same offset the
- * Linux clk-imx93 driver uses for the TPM2 gate. Bit 0 is the enable. This is
- * the worked example of an LPCG whose gating actually reaches its consumer; the
- * pattern generalises to LPCG44/46..49 for the other TPMs.
+ * LPCG (Low-Power Clock Gating) DIRECT registers for the TPMs. Per the i.MX93
+ * RM the tpm functional clocks are gated by LPCG44..49 (LPCG44 = tpm1 ...
+ * LPCG49 = tpm6, named clk_enable_tpmN_ch), whose DIRECT registers are at
+ * LPCGn_DIRECT = 0x8000 + n*0x40, i.e. TPM(i) at 0x8B00 + i*0x40 for i in
+ * 0..5. Each resets to 0x0000_0001 (gate ON out of reset). Bit 0 is the enable.
+ * These are the same offsets the Linux clk-imx93 driver uses for the tpm gates.
+ * Clearing a DIRECT bit removes that block's clock and freezes its counter.
  */
-#define CCM_LPCG_TPM2       0x8b40
+#define CCM_LPCG_TPM_BASE   0x8b00
+#define CCM_NUM_TPM         6
 #define CCM_LPCG_ON         0x1
-/* Nominal tpm2 functional clock when the gate is open (matches the TPM model). */
-#define CCM_TPM2_HZ         24000000
+/* Nominal tpm functional clock when the gate is open (matches the TPM model). */
+#define CCM_TPM_HZ          24000000
+
+/* DIRECT-register offset of TPM(i)'s LPCG (i in 0..CCM_NUM_TPM-1). */
+static inline hwaddr ccm_tpm_lpcg_off(unsigned i)
+{
+    return CCM_LPCG_TPM_BASE + i * CCM_GATE_STRIDE;
+}
 
 /*
  * pdm_root and spdif_root select their source with AUDIO_SEL (clk-imx93
@@ -141,13 +149,13 @@ static void imx93_ccm_update_audio_clock(IMX93CCMState *s, hwaddr control_off)
     }
 }
 
-/* Drive the TPM2 module clock from its LPCG gate: 24 MHz when open, else 0. */
-static void imx93_ccm_update_tpm2_gate(IMX93CCMState *s)
+/* Drive TPM(i)'s module clock from its LPCG gate: 24 MHz when open, else 0. */
+static void imx93_ccm_update_tpm_gate(IMX93CCMState *s, unsigned i)
 {
-    bool on = s->regs[CCM_LPCG_TPM2 / 4] & CCM_LPCG_ON;
+    bool on = s->regs[ccm_tpm_lpcg_off(i) / 4] & CCM_LPCG_ON;
 
-    clock_set_hz(s->tpm2_clk, on ? CCM_TPM2_HZ : 0);
-    clock_propagate(s->tpm2_clk);
+    clock_set_hz(s->tpm_clk[i], on ? CCM_TPM_HZ : 0);
+    clock_propagate(s->tpm_clk[i]);
 }
 
 static void imx93_ccm_write(void *opaque, hwaddr offset, uint64_t value,
@@ -165,9 +173,12 @@ static void imx93_ccm_write(void *opaque, hwaddr offset, uint64_t value,
     if (offset == CCM_ROOT_PDM || offset == CCM_ROOT_SPDIF) {
         imx93_ccm_update_audio_clock(s, offset);
     }
-    /* Clearing/setting the TPM2 LPCG DIRECT gates/ungates its module clock. */
-    if (offset == CCM_LPCG_TPM2) {
-        imx93_ccm_update_tpm2_gate(s);
+    /* Clearing/setting a TPM's LPCG DIRECT gates/ungates its module clock. */
+    if (offset >= ccm_tpm_lpcg_off(0) &&
+        offset <= ccm_tpm_lpcg_off(CCM_NUM_TPM - 1) &&
+        (offset & (CCM_GATE_STRIDE - 1)) == 0) {
+        imx93_ccm_update_tpm_gate(s, (offset - CCM_LPCG_TPM_BASE) /
+                                     CCM_GATE_STRIDE);
     }
 }
 
@@ -196,9 +207,11 @@ static void imx93_ccm_reset_hold(Object *obj, ResetType type)
     imx93_ccm_update_audio_clock(s, CCM_ROOT_PDM);
     imx93_ccm_update_audio_clock(s, CCM_ROOT_SPDIF);
 
-    /* LPCG45_DIRECT resets to 0x1 (RM): TPM2 comes up clocked. */
-    s->regs[CCM_LPCG_TPM2 / 4] = CCM_LPCG_ON;
-    imx93_ccm_update_tpm2_gate(s);
+    /* LPCG44..49_DIRECT reset to 0x1 (RM): every TPM comes up clocked. */
+    for (unsigned i = 0; i < CCM_NUM_TPM; i++) {
+        s->regs[ccm_tpm_lpcg_off(i) / 4] = CCM_LPCG_ON;
+        imx93_ccm_update_tpm_gate(s, i);
+    }
 }
 
 static void imx93_ccm_init(Object *obj)
@@ -211,7 +224,10 @@ static void imx93_ccm_init(Object *obj)
 
     s->pdm_root = qdev_init_clock_out(DEVICE(obj), "pdm_root");
     s->spdif_root = qdev_init_clock_out(DEVICE(obj), "spdif_root");
-    s->tpm2_clk = qdev_init_clock_out(DEVICE(obj), "tpm2_clk");
+    for (unsigned i = 0; i < CCM_NUM_TPM; i++) {
+        g_autofree char *name = g_strdup_printf("tpm%u_clk", i + 1);
+        s->tpm_clk[i] = qdev_init_clock_out(DEVICE(obj), name);
+    }
 }
 
 static const VMStateDescription vmstate_imx93_ccm = {
