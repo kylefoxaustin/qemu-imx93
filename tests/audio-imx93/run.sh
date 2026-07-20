@@ -179,9 +179,14 @@ echo "PASS: real PCM through wm8962/SAI3 -> eDMA3 cyclic, verified at $RATES Hz"
     echo "PASS: MICFIL PDM capture -> eDMA1, sample rate derived from CCM pdm_root, verified at $RATES Hz"
 
 # ---------------------------------------------------------------------------
-# XCVR / SPDIF leg: own spdif-only boots, so the wm8962/SAI datapath does not
-# color the verdict and the two in-range rates (48 k, 32 k) can catch a pacer
-# that stopped reading spdif_root.
+# XCVR / SPDIF leg: own spdif-only boots. This separation is REQUIRED, not
+# tidiness: the wm8962/SAI and the XCVR both open an out-voice on the single
+# `-audio driver=wav` backend, so if both play in one boot the wav records BOTH
+# square waves and check_wav sees a two-segment capture (once observed as a 32 k
+# SAI "drop": 53113 frames not 32000, 49.8% of runs off, tone averaged to
+# 349 Hz). Only one audio-playback datapath may drive the shared wav backend per
+# boot. The two in-range rates (48 k, 32 k) also catch a pacer that stopped
+# reading spdif_root.
 # ---------------------------------------------------------------------------
 if [ "$XCVR_TX" = 1 ]; then
     for RATE in $SPDIF_RATES; do
