@@ -97,24 +97,14 @@ QEMU_BUILD_BUG_ON(MICFIL_ADVERTISED_DEPTH >
 static uint64_t imx93_micfil_rate(IMX93MicfilState *s)
 {
     uint64_t mclk = s->pdm_clk ? clock_get_hz(s->pdm_clk) : 0;
-    uint64_t rate = mclk / MICFIL_MCLK_RATIO;
 
-    if (rate == 0) {
-        /*
-         * The CCM has not routed a real clock to us yet (pdm_root at its
-         * osc_24m idle gives 24 MHz / 1024 = a valid rate, so 0 only happens
-         * if the mux points at an unmodelled source). Say so once and pace at
-         * a sane default rather than schedule a zero-period timer that
-         * livelocks - a clock that is not running must not run infinitely fast.
-         */
-        if (!s->warned_no_clock) {
-            s->warned_no_clock = true;
-            qemu_log_mask(LOG_GUEST_ERROR, "imx93-micfil: no PDM clock from the "
-                          "CCM; pacing at 48 kHz\n");
-        }
-        rate = 48000;
-    }
-    return rate;
+    /*
+     * 0 when the CCM has routed no usable clock - either the guest cleared the
+     * PDM LPCG (LPCG107) or the root mux points at an unmodelled source. Either
+     * way there is no clock, so the caller freezes the capture rather than
+     * fabricating a rate; the word timer is never armed with a 0 period.
+     */
+    return mclk / MICFIL_MCLK_RATIO;
 }
 
 /* Nanoseconds between clocked-in words: (1 / (rate * channels)). */
@@ -134,6 +124,29 @@ static bool imx93_micfil_running(IMX93MicfilState *s)
     uint32_t ctrl1 = R(s, MICFIL_CTRL1);
 
     return (ctrl1 & MICFIL_CTRL1_PDMIEN) && !(ctrl1 & MICFIL_CTRL1_MDIS);
+}
+
+/*
+ * Arm or freeze the capture timer. The MICFIL clocks a word only while it is
+ * running AND the CCM feeds it a non-zero PDM clock; clearing the PDM LPCG (or
+ * an unclocked root) drops the rate to 0, which freezes the FIFO rather than
+ * arming a 0-period timer. Re-gating restarts it - the tick, the enable path and
+ * the pdm_clk gate callback all route through here.
+ */
+static void imx93_micfil_resched(IMX93MicfilState *s)
+{
+    if (imx93_micfil_running(s) && imx93_micfil_rate(s) > 0) {
+        timer_mod(s->rx_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                               imx93_micfil_word_ns(s));
+    } else {
+        timer_del(s->rx_timer);
+    }
+}
+
+/* The CCM's PDM LPCG gate changed the clock: freeze or resume accordingly. */
+static void imx93_micfil_clk_update(void *opaque, ClockEvent event)
+{
+    imx93_micfil_resched(opaque);
 }
 
 /*
@@ -184,8 +197,7 @@ static void imx93_micfil_rx_tick(void *opaque)
         qemu_irq_pulse(s->dma_req);
     }
 
-    timer_mod(s->rx_timer,
-              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + imx93_micfil_word_ns(s));
+    imx93_micfil_resched(s);
 }
 
 static uint64_t imx93_micfil_read(void *opaque, hwaddr offset, unsigned size)
@@ -208,9 +220,11 @@ static uint64_t imx93_micfil_read(void *opaque, hwaddr offset, unsigned size)
             /*
              * The eDMA reads a channel's data register to drain the FIFO. Pop
              * the next sample; if the FIFO is empty but the module is running
-             * (the eDMA bursts several words per request, out-running the
-             * word-rate tick), synthesise on demand so a real capture never
-             * reads silence.
+             * AND clocked (the eDMA bursts several words per request, out-running
+             * the word-rate tick), synthesise on demand so a real capture never
+             * reads silence. With no clock - the PDM LPCG cleared - there is no
+             * new sample to synthesise, so a drained FIFO reads 0: gating stops
+             * the data, not just the pacing.
              */
             uint32_t word;
 
@@ -218,8 +232,10 @@ static uint64_t imx93_micfil_read(void *opaque, hwaddr offset, unsigned size)
                 word = s->rx_fifo[s->rx_rptr];
                 s->rx_rptr = (s->rx_rptr + 1) % IMX93_MICFIL_FIFO_DEPTH;
                 s->rx_count--;
+            } else if (imx93_micfil_running(s) && imx93_micfil_rate(s) > 0) {
+                word = imx93_micfil_next_word(s);
             } else {
-                word = imx93_micfil_running(s) ? imx93_micfil_next_word(s) : 0;
+                word = 0;
             }
             return word;
         }
@@ -265,8 +281,9 @@ static void imx93_micfil_write(void *opaque, hwaddr offset, uint64_t value,
              * value the word timer paces at, so the trace cannot drift from it.
              */
             trace_imx93_micfil_capture_start(hz, imx93_micfil_rate(s));
-            timer_mod(s->rx_timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + imx93_micfil_word_ns(s));
+            /* Arms the timer only if the PDM clock is gated on; a capture
+             * started into a cleared LPCG stays frozen until it is re-gated. */
+            imx93_micfil_resched(s);
         } else if (!now_running && was_running) {
             timer_del(s->rx_timer);
             imx93_micfil_rx_reset(s);
@@ -319,11 +336,14 @@ static void imx93_micfil_init(Object *obj)
     IMX93MicfilState *s = IMX93_MICFIL(obj);
 
     /*
-     * The PDM sample-rate clock is an input driven by the CCM's pdm_root. It
-     * must exist before the board wires it, so create it in instance_init -
-     * qdev_connect_clock_in() asserts the device is not yet realized.
+     * The PDM sample-rate clock is an input driven by the CCM's pdm_root (rate)
+     * gated by LPCG107 (0 when the guest clears the gate). It must exist before
+     * the board wires it, so create it in instance_init - qdev_connect_clock_in()
+     * asserts the device is not yet realized. The ClockUpdate callback freezes or
+     * resumes the capture when the gate toggles mid-stream.
      */
-    s->pdm_clk = qdev_init_clock_in(DEVICE(obj), "pdm_clk", NULL, NULL, 0);
+    s->pdm_clk = qdev_init_clock_in(DEVICE(obj), "pdm_clk",
+                                    imx93_micfil_clk_update, s, ClockUpdate);
 }
 
 static const VMStateDescription vmstate_imx93_micfil = {

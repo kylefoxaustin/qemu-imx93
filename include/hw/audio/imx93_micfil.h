@@ -51,7 +51,6 @@ struct IMX93MicfilState {
     uint32_t rx_wptr;
     uint32_t rx_count;          /* words currently in the FIFO */
     uint64_t rx_words;          /* total samples clocked in (drives waveform) */
-    bool warned_no_clock;       /* logged the missing-PDM-clock guard once */
 };
 
 #endif /* IMX93_MICFIL_H */

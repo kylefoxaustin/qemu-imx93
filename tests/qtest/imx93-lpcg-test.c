@@ -88,9 +88,58 @@ static void test_gate_stops_tpm(void)
     qtest_quit(qts);
 }
 
+/*
+ * The audio consumers are gated the same way: the CCM feeds MICFIL/XCVR a clock
+ * that is the root rate when their LPCG is set and 0 when it is clear, and the
+ * device freezes on 0. MICFIL is the observable one - a running capture pops the
+ * synthesised ramp from DATACH0, but with its PDM LPCG (LPCG107 @ CCM+0x9ac0)
+ * cleared there is no clock and a drained FIFO reads 0. So DATACH0 carries a
+ * live signal while gated, zero once gated off, and live again on re-gate.
+ */
+#define MICFIL_BASE     0x44520000ULL
+#define MICFIL_CTRL1    0x00
+#define MICFIL_DATACH0  0x24
+#define CTRL1_PDMIEN    (1u << 29)
+#define CCM_PDM_DIRECT  (0x44450000ULL + 0x9ac0ULL)
+
+static int micfil_nonzero_of(QTestState *qts, int n)
+{
+    int nz = 0, k;
+
+    for (k = 0; k < n; k++) {
+        if (qtest_readl(qts, MICFIL_BASE + MICFIL_DATACH0) != 0) {
+            nz++;
+        }
+    }
+    return nz;
+}
+
+static void test_gate_stops_micfil(void)
+{
+    QTestState *qts = qtest_init("-machine imx93-11x11-evk -display none");
+
+    /* PDM LPCG comes up set out of reset (RM: LPCG107_DIRECT reset 0x1). */
+    g_assert_cmphex(qtest_readl(qts, CCM_PDM_DIRECT) & GATE_ON, ==, GATE_ON);
+
+    /* Enable PDM capture: DATACH0 now yields the synthesised ramp (non-silent). */
+    qtest_writel(qts, MICFIL_BASE + MICFIL_CTRL1, CTRL1_PDMIEN);
+    g_assert_cmpint(micfil_nonzero_of(qts, 6), >, 0);
+
+    /* Clear the PDM LPCG: no clock, so a drained FIFO reads 0 - capture stops. */
+    qtest_writel(qts, CCM_PDM_DIRECT, 0);
+    g_assert_cmpint(micfil_nonzero_of(qts, 6), ==, 0);
+
+    /* Re-gate: the clock returns and the ramp resumes. */
+    qtest_writel(qts, CCM_PDM_DIRECT, GATE_ON);
+    g_assert_cmpint(micfil_nonzero_of(qts, 6), >, 0);
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
     qtest_add_func("/imx93/lpcg/gate-stops-tpm", test_gate_stops_tpm);
+    qtest_add_func("/imx93/lpcg/gate-stops-micfil", test_gate_stops_micfil);
     return g_test_run();
 }

@@ -52,6 +52,16 @@
 #define CCM_ROOT_SPDIF      0x2a80
 
 /*
+ * LPCG DIRECT registers that gate the audio functional clocks (RM): LPCG107 =
+ * clk_enable_pdm_ch at 0x9AC0 feeds the MICFIL, LPCG112 = clk_enable_spdif_ch
+ * at 0x9C00 feeds the XCVR. Both reset to 0x0000_0001 (gate ON). Clearing the
+ * bit removes that block's clock, so the CCM folds it into the rate it hands the
+ * consumer: gated off -> 0 Hz, and the consumer freezes rather than paces.
+ */
+#define CCM_LPCG_PDM        0x9ac0
+#define CCM_LPCG_SPDIF      0x9c00
+
+/*
  * LPCG (Low-Power Clock Gating) DIRECT registers for the TPMs. Per the i.MX93
  * RM the tpm functional clocks are gated by LPCG44..49 (LPCG44 = tpm1 ...
  * LPCG49 = tpm6, named clk_enable_tpmN_ch), whose DIRECT registers are at
@@ -140,13 +150,27 @@ static uint64_t ccm_audio_root_hz(uint32_t control)
 
 static void imx93_ccm_update_audio_clock(IMX93CCMState *s, hwaddr control_off)
 {
-    Clock *clk = control_off == CCM_ROOT_PDM   ? s->pdm_root   :
-                 control_off == CCM_ROOT_SPDIF ? s->spdif_root : NULL;
+    Clock *clk;
+    hwaddr gate_off;
+    uint64_t hz;
 
-    if (clk) {
-        clock_set_hz(clk, ccm_audio_root_hz(s->regs[control_off / 4]));
-        clock_propagate(clk);
+    if (control_off == CCM_ROOT_PDM) {
+        clk = s->pdm_root;
+        gate_off = CCM_LPCG_PDM;
+    } else if (control_off == CCM_ROOT_SPDIF) {
+        clk = s->spdif_root;
+        gate_off = CCM_LPCG_SPDIF;
+    } else {
+        return;
     }
+
+    /* Fold the LPCG gate into the rate: gated off -> 0, so the consumer freezes
+     * instead of pacing. Both the CONTROL (rate) and the DIRECT (gate) re-derive
+     * this. */
+    hz = (s->regs[gate_off / 4] & CCM_LPCG_ON) ?
+         ccm_audio_root_hz(s->regs[control_off / 4]) : 0;
+    clock_set_hz(clk, hz);
+    clock_propagate(clk);
 }
 
 /* Drive TPM(i)'s module clock from its LPCG gate: 24 MHz when open, else 0. */
@@ -172,6 +196,13 @@ static void imx93_ccm_write(void *opaque, hwaddr offset, uint64_t value,
     /* A write to an audio root's CONTROL re-derives its output frequency. */
     if (offset == CCM_ROOT_PDM || offset == CCM_ROOT_SPDIF) {
         imx93_ccm_update_audio_clock(s, offset);
+    }
+    /* A write to an audio LPCG DIRECT gates/ungates that same output. */
+    if (offset == CCM_LPCG_PDM) {
+        imx93_ccm_update_audio_clock(s, CCM_ROOT_PDM);
+    }
+    if (offset == CCM_LPCG_SPDIF) {
+        imx93_ccm_update_audio_clock(s, CCM_ROOT_SPDIF);
     }
     /* Clearing/setting a TPM's LPCG DIRECT gates/ungates its module clock. */
     if (offset >= ccm_tpm_lpcg_off(0) &&
@@ -201,6 +232,11 @@ static void imx93_ccm_reset_hold(Object *obj, ResetType type)
     IMX93CCMState *s = IMX93_CCM(obj);
 
     memset(s->regs, 0, sizeof(s->regs));
+
+    /* Audio LPCGs reset to 0x1 (RM: LPCG107/112_DIRECT): PDM/SPDIF come up
+     * clocked, so the update below reads a gated-on rate, not 0. */
+    s->regs[CCM_LPCG_PDM / 4] = CCM_LPCG_ON;
+    s->regs[CCM_LPCG_SPDIF / 4] = CCM_LPCG_ON;
 
     /* CONTROL 0 -> mux osc_24m, DIV 0 -> the roots idle at 24 MHz (matches the
      * guest clk_summary before any audio stream reprograms them). */

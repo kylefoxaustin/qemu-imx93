@@ -66,24 +66,16 @@
 #define XCVR_SPDIF_RATIO    128
 
 /*
- * SPDIF sample rate, derived from the CCM's spdif_root rather than a hardcoded
- * 48 kHz. Falls back to 48 kHz (logged once) if the CCM has not routed a real
- * clock, so the word timer never gets a zero period.
+ * SPDIF sample rate, derived from the CCM's spdif_root. 0 when the CCM routes no
+ * usable clock - either the guest cleared the SPDIF LPCG (LPCG112) or the root
+ * mux is unclocked. The caller freezes TX rather than fabricating a rate, so the
+ * word timer is never armed with a 0 period.
  */
 static uint64_t xcvr_spdif_rate(IMX93XcvrState *s)
 {
     uint64_t hz = s->spdif_clk ? clock_get_hz(s->spdif_clk) : 0;
-    uint64_t rate = hz / XCVR_SPDIF_RATIO;
 
-    if (rate == 0) {
-        if (!s->warned_no_clock) {
-            s->warned_no_clock = true;
-            qemu_log_mask(LOG_GUEST_ERROR, "imx93-xcvr: no SPDIF clock from the "
-                          "CCM; pacing at 48 kHz\n");
-        }
-        rate = 48000;
-    }
-    return rate;
+    return hz / XCVR_SPDIF_RATIO;
 }
 
 /* Nanoseconds between clocked-out words: 1 / (Fs * channels). */
@@ -100,6 +92,27 @@ static bool xcvr_tx_active(IMX93XcvrState *s)
 
     return (ec & EXT_CTRL_SPDIF_MODE) && !(ec & EXT_CTRL_TX_DPTH_RESET) &&
            !(ec & EXT_CTRL_DMA_WR_DIS);
+}
+
+/*
+ * Arm or freeze the TX timer. TX clocks a word only while it is active AND the
+ * CCM feeds a non-zero SPDIF clock; clearing the SPDIF LPCG drops the rate to 0
+ * and freezes the FIFO rather than arming a 0-period timer. Re-gating resumes.
+ */
+static void xcvr_tx_resched(IMX93XcvrState *s)
+{
+    if (xcvr_tx_active(s) && xcvr_spdif_rate(s) > 0) {
+        timer_mod(s->tx_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                               xcvr_tx_word_ns(s));
+    } else {
+        timer_del(s->tx_timer);
+    }
+}
+
+/* The CCM's SPDIF LPCG gate changed the clock: freeze or resume TX. */
+static void xcvr_clk_update(void *opaque, ClockEvent event)
+{
+    xcvr_tx_resched(opaque);
 }
 
 /* Queue clocked-out bytes for the audio backend. */
@@ -169,8 +182,7 @@ static void xcvr_tx_tick(void *opaque)
     if (s->tx_count <= watermark) {
         qemu_irq_pulse(s->dma_req);
     }
-    timer_mod(s->tx_timer,
-              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + xcvr_tx_word_ns(s));
+    xcvr_tx_resched(s);
 }
 
 /* Perform the indirect PHY/PLL access and acknowledge it via the DONE bits. */
@@ -299,8 +311,9 @@ static void xcvr_write(void *opaque, hwaddr offset, uint64_t value,
              * value the word timer paces at), so a harness can check it tracks
              * the requested Fs instead of a constant. */
             trace_imx93_xcvr_tx_start(hz, xcvr_spdif_rate(s));
-            timer_mod(s->tx_timer,
-                      qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + xcvr_tx_word_ns(s));
+            /* Arms only if the SPDIF clock is gated on; TX into a cleared LPCG
+             * stays frozen until it is re-gated. */
+            xcvr_tx_resched(s);
         } else if (!active && timer_pending(s->tx_timer)) {
             timer_del(s->tx_timer);
             xcvr_voice_set(s, false);
@@ -335,11 +348,14 @@ static void xcvr_init(Object *obj)
     IMX93XcvrState *s = IMX93_XCVR(obj);
 
     /*
-     * The SPDIF sample-rate clock is an input driven by the CCM's spdif_root.
-     * It must exist before the board wires it, so create it in instance_init -
-     * qdev_connect_clock_in() asserts the device is not yet realized.
+     * The SPDIF sample-rate clock is an input driven by the CCM's spdif_root
+     * (rate) gated by LPCG112 (0 when the guest clears the gate). It must exist
+     * before the board wires it, so create it in instance_init -
+     * qdev_connect_clock_in() asserts the device is not yet realized. The
+     * ClockUpdate callback freezes or resumes TX when the gate toggles.
      */
-    s->spdif_clk = qdev_init_clock_in(DEVICE(obj), "spdif_clk", NULL, NULL, 0);
+    s->spdif_clk = qdev_init_clock_in(DEVICE(obj), "spdif_clk",
+                                      xcvr_clk_update, s, ClockUpdate);
 }
 
 static void xcvr_realize(DeviceState *dev, Error **errp)
