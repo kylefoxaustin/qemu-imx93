@@ -334,6 +334,16 @@ initramfs and interconnect oracles.
   status`) instead of being handed a fabricated success. Boot is unaffected.
   `-global driver=imx93.ele,property=fake-uncomputed-success,value=on` restores
   the old blanket-success behaviour for debugging.
+- **Guest-driven M33 *re*-start is a documented i.MX93 limitation, not a model
+  gap.** The first M33 start and the full A55↔M33 RPMsg round-trip work; but a
+  `remoteproc` stop→start of the stock `rpmsg_lite` pingpong firmware desyncs the
+  mailbox — on real silicon the MU lives in always-on AONMIX and is **not** reset
+  by an M-core stop (its TX/pending state is stale on restart → the well-known
+  `imx_rproc_kick: failed … err:-62`, `-ETIMEDOUT`), and NXP's demo firmware
+  destroys its rpmsg endpoint after ~100 iterations and never re-initialises (NXP
+  KB `ta-p/2066755`). A clean restart needs **both** a Linux driver change and
+  firmware fixes; QEMU faithfully reproduces the wedge. The single start→stop
+  lifecycle is verified (`tests/m33-lifecycle`).
 - **First-boot time is dominated by initramfs decompression under TCG** — a
   ~430 MB rootfs unpacks to ~1.3 GB tmpfs (~12 s here). Not a hang; a small
   busybox initramfs boots far faster.
