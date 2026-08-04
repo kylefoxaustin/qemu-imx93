@@ -91,10 +91,15 @@ on the **stock `imx93-11x11-evk` device tree — no DT modifications**. This tab
 is the condensed capability view; the per-IP-block evidence, with the same
 **Tier / N-A** language, lives in
 [`docs/validation/test-result-matrix.md`](docs/validation/test-result-matrix.md)
-(one source of truth, `test-matrix.yaml`, two renderings). Tiers: **A** data-path
-verified (real data moves, integrity-checked) · **B** driver bring-up (binds,
-registers/IRQ/timing correct) · **N/A** absent on i.MX 93 silicon (never a
-failure).
+(one source of truth, `test-matrix.yaml`, two renderings). Tiers (the
+fleet-canonical **A/B/C/N-A**): **A** data-path verified (real data moves,
+integrity-checked) · **B** driver bring-up (binds, registers/IRQ/timing correct —
+stubbed-but-doable) · **C** proprietary compute (unmodelable microcode/logic, no
+algorithm in the RM) · **N/A** absent on i.MX 93 silicon (never a failure).
+**i.MX 93 has zero Tier-C blocks** — its NPU, PXP and M33 are documented and
+modelled to Tier A, not proprietary black boxes, and the one proprietary surface
+(ELE crypto) is honest-faulted at B; C is defined only so **B** means the same
+thing fleet-wide.
 
 <!-- BEGIN capability-table (generated from test-matrix.yaml) -->
 | Subsystem | Tier | Evidence |

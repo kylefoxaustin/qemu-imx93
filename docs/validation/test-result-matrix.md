@@ -13,9 +13,9 @@ _Status column source: real meson testlog._
 | Tier | Meaning |
 |------|---------|
 | **A** | Data path verified — real data/compute flows through the block and is checked against a golden or reference (end-to-end in-guest and/or qtest with golden output). |
-| **B** | Driver bring-up — the stock BSP Linux driver probes and operates the block (registers, IRQs, basic transactions); correct for bring-up but no golden-verified host data path. QEMU's usual peripheral convention. |
-| **C** | Registration / stub — present so Linux enumerates it and does not fault; minimal or no functional behaviour. |
-| **N/A** | Not present on i.MX 93 (documented so the absence is not mistaken for a gap). |
+| **B** | Driver bring-up — the stock BSP Linux driver probes and operates the block (registers, IRQs, basic transactions); correct for bring-up but no golden-verified host data path. Spans bare registration/enumeration (the old 'stub' sense) up to full driver operation; the common thread is stubbed-but-DOABLE, not proprietary. QEMU's usual peripheral convention. |
+| **C** | Proprietary compute — the block's core function is proprietary microcode/logic with no ISA or algorithm in the reference manual, so it cannot be modelled honestly (only its host-visible register/mailbox interface can exist). i.MX 93 has ZERO Tier-C blocks (see the taxonomy caveat); C is defined so that Tier B provably means the same thing fleet-wide. |
+| **N/A** | Not present on i.MX 93 silicon — the block genuinely does not exist on this SoC (distinct from Tier C, which is present but unmodelable). Documented so an absence is never mistaken for a gap. |
 
 ## Test harnesses
 
@@ -93,6 +93,7 @@ _Status column source: real meson testlog._
 
 | Area | Boundary | Disposition |
 |------|----------|-------------|
+| Fidelity tier C (proprietary compute) | i.MX 93 has zero Tier-C blocks | Ethos-U65 NPU / PXP / Cortex-M33 are documented and modelled to Tier A (not opaque); ELE crypto is honest-faulted at Tier B, not silently stubbed. C is defined with no rows so Tier B means the same thing fleet-wide (stubbed-but-doable, never proprietary-forever) |
 | M33 concurrent boot | Booting the M33 while the desktop guest runs can wedge the guest | Two NXP BSP defects, documented in tests/torture/; not a model bug |
 | PXP G2D | scale + CSC not modelled | libg2d/pxp_dma_v3 vendor stack rejects the op; copy/fill/blit/blend/rotate byte-exact |
 | NPU mlw decoder | hw/npu/mlw is Apache-2.0 | Upstream-licensing blocker for the NPU only; does not block the core machine |
