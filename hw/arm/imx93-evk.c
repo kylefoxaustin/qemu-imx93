@@ -7,9 +7,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * v0.0.1 scope: instantiate the SoC, attach DDR, hand control to
- * arm_load_kernel() so -kernel works. No DTB modification, no SD card,
- * no console yet (LPUART model arrives in v0.0.2).
+ * Instantiates the FSL_IMX93 SoC, attaches LPDDR4X, wires the per-FlexCAN
+ * can-bus links, and boots a kernel (or firmware) on the stock
+ * imx93-11x11-evk device tree with no DT modification.
  */
 
 #include "qemu/osdep.h"
@@ -71,6 +71,17 @@ static void imx93_evk_init(MachineState *machine)
     FslImx93State *s;
     int i;
 
+    /*
+     * The SoC instantiates a Cortex-M33 real-time core, which is M-profile and
+     * has no KVM support, so the whole machine is TCG-only. Reject -accel kvm
+     * up front with a clear message rather than aborting later in M33 realize.
+     */
+    if (kvm_enabled()) {
+        error_report("The imx93-11x11-evk machine requires TCG: it emulates a "
+                     "Cortex-M33 real-time core that KVM cannot run");
+        exit(1);
+    }
+
     if (machine->ram_size > FSL_IMX93_RAM_SIZE_MAX) {
         error_report("RAM size " RAM_ADDR_FMT
                      " above max supported (0x%" PRIx64 ")",
@@ -127,16 +138,26 @@ static void imx93_evk_init(MachineState *machine)
 
 static const char *imx93_evk_get_default_cpu_type(const MachineState *ms)
 {
-    if (kvm_enabled()) {
-        return ARM_CPU_TYPE_NAME("host");
-    }
+    /* TCG-only machine (M33 core has no KVM); the A55 cluster is Cortex-A55. */
     return ARM_CPU_TYPE_NAME("cortex-a55");
 }
 
 static void imx93_11x11_evk_machine_init(MachineClass *mc)
 {
+    /*
+     * The A55 cluster is a fixed Cortex-A55; reject any other -cpu with a
+     * clean error rather than piping it into the A55/GIC/EL3 wiring - e.g.
+     * "-cpu cortex-m33" would otherwise abort on the missing cntfrq property,
+     * and a wrong A-core would silently build the wrong silicon.
+     */
+    static const char * const valid_cpu_types[] = {
+        ARM_CPU_TYPE_NAME("cortex-a55"),
+        NULL
+    };
+
     mc->desc                  = "NXP i.MX 93 11x11 EVK (LPDDR4X)";
     mc->init                  = imx93_evk_init;
+    mc->valid_cpu_types       = valid_cpu_types;
     /*
      * The A55 cluster plus the always-present Cortex-M33 real-time core. TCG
      * sizes its per-CPU context table from smp.max_cpus, so both the default

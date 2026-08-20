@@ -1,5 +1,5 @@
 /*
- * NXP i.MX 93 SoC Implementation - v0.0.1 scaffold
+ * NXP i.MX 93 SoC Implementation
  *
  * Modeled on hw/arm/fsl-imx8mp.c (Bernhard Beschow) and the i.MX 95 port.
  *
@@ -7,18 +7,16 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * v0.0.1 scope:
- *   - 2x Cortex-A55 cluster instantiated
- *   - GICv3 wired to both cores including timer PPIs
- *   - DDR mapped at 0x8000_0000, OCRAM at 0x2048_0000
- *   - All non-CPU/GIC peripherals are create_unimplemented_device() stubs
- *     so accesses log instead of faulting
- *   - No LPUART model yet (next step in v0.0.2)
- *
- * Addresses are taken from imx93.dtsi and the i.MX 93 RM. Unlike i.MX 95,
- * the i.MX 93 has no System Manager, so CCM/ANATOP/IOMUXC/SRC are stubbed
- * here only as a starting point - they must be modeled functionally before
- * Linux clock/pinmux bring-up will succeed.
+ * A dual-Cortex-A55 cluster (GICv3, timer PPIs) plus the always-present
+ * Cortex-M33 real-time core (its own NVIC), booting stock NXP Linux to
+ * userspace on the unmodified imx93-11x11-evk device tree. The i.MX 93 has
+ * no System Manager, so - unlike the i.MX 95 - CCM/ANATOP/SRC are modeled
+ * functionally here (Linux programs them directly). Peripherals with their
+ * own device models (LPUART, FEC/eQOS, uSDHC, LCDIFv3/DSI, ISI/CSI, SAI, PXP,
+ * eDMA, LPI2C/LPSPI, FlexCAN, USB, Ethos-U65, ...) are instantiated below;
+ * addresses come from imx93.dtsi and the i.MX 93 RM. Remaining blocks are
+ * create_unimplemented_device() stubs so stray accesses log instead of
+ * faulting. See docs/validation/ for the per-block fidelity matrix.
  */
 
 #include "qemu/osdep.h"
