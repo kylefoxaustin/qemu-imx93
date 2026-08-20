@@ -1,8 +1,14 @@
 # Ethos-U65 capabilities round-trip (fork-only demo)
 
-This is the first step of the **fork-only inference demo** for the QEMU i.MX93
-machine. It proves the complete A55 → M33 → NPU path works end to end, before
-any real compute engine exists.
+This checks the **transport** of the fork's NPU stack on the QEMU i.MX93
+machine: it proves the complete A55 → M33 → NPU path works end to end, without
+running any compute.
+
+The compute engine does exist — the Ethos-U executor in `hw/npu/` runs the Vela
+command stream in QEMU. For a full inference through this same path, see
+`tests/ethosu-infer/`. This test is deliberately narrower: it isolates
+on-demand M33 boot + rpmsg + register readback, so a transport regression can be
+told apart from a compute regression.
 
 `ethosu_caps.c` is a tiny static aarch64 guest tool. It opens `/dev/ethosu0`
 and issues `ETHOSU_IOCTL_CAPABILITIES_REQ`. That:
@@ -11,7 +17,7 @@ and issues `ETHOSU_IOCTL_CAPABILITIES_REQ`. That:
    i.MX SiP `RPROC` SMC, which the machine services by releasing the M33),
 2. brings up `rpmsg-ethosu-channel` over MU1/rpmsg,
 3. sends the capabilities request to the M33 firmware, which reads the
-   **modelled** Ethos-U65 `ID`/`CONFIG` registers (`hw/misc/imx93_ethosu.c`),
+   **modelled** Ethos-U65 `ID`/`CONFIG` registers (`hw/npu/ethos_u.c`),
 4. replies, and the tool prints what the NPU reported.
 
 Expected output (from the modelled register values):

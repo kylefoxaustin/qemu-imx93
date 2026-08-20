@@ -4,16 +4,18 @@
 #
 # The NPU is not a Linux-mapped peripheral on the i.MX93 - its device-tree node
 # has no "reg"; it is driven by Cortex-M33 firmware and Linux only ships
-# inference jobs over RPMsg. So there is nothing to model: this test just
-# confirms the arm,ethosu driver binds and registers /dev/ethosu0 (the same
-# bind/register bar used for every other peripheral). Expect:
+# inference jobs over RPMsg. So there is nothing for LINUX to map, and this test
+# scope is just the driver bind: it confirms arm,ethosu binds and registers
+# /dev/ethosu0 (the same bind/register bar used for every other peripheral).
+# Expect:
 #
 #   /dev/ethosu0
 #   remoteproc0 ... name=imx-rproc
 #   (empty deferred-probe list)
 #
-# Running an actual inference is out of scope (needs M33 firmware + an NPU
-# compute model).
+# Running an actual inference is out of scope FOR THIS TEST, not for the port:
+# the Ethos-U executor in hw/npu/ computes the command stream in QEMU, and
+# tests/ethosu-infer/ drives a real end-to-end inference through the M33.
 #
 # Override paths via env: KERNEL=/path/Image DTB=/path.dtb BASE_INITRD=...
 set -u
