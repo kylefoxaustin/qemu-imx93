@@ -541,6 +541,30 @@ static const Property imx93_edma_properties[] = {
                        IMX93_EDMA_CHAN_STRIDE),
 };
 
+/*
+ * A channel's interrupt line level is a pure function of its CH_INT flag
+ * (raised when a major loop completes with TCD_CSR.INTMAJ, lowered on the
+ * driver's write-1-to-clear) and is NOT part of the migration stream. Without a
+ * post_load, a completion interrupt that was pending-but-unacked at savevm is
+ * lost across loadvm - the qemu_irq de-asserts on the destination and a driver
+ * blocked on that channel's completion never wakes. Re-derive each line from the
+ * loaded CH_INT using the same predicate the raise/clear paths use.
+ */
+static void imx93_edma_update_irq(IMX93EdmaState *s)
+{
+    unsigned i;
+
+    for (i = 0; i < s->num_channels; i++) {
+        qemu_set_irq(s->irq[i], ld32(s->chan[i].regs + CH_INT) & 1);
+    }
+}
+
+static int imx93_edma_post_load(void *opaque, int version_id)
+{
+    imx93_edma_update_irq(opaque);
+    return 0;
+}
+
 static const VMStateDescription vmstate_imx93_edma_chan = {
     .name = "imx93.edma3.chan",
     .version_id = 1,
@@ -557,6 +581,7 @@ static const VMStateDescription vmstate_imx93_edma = {
     .name = TYPE_IMX93_EDMA,
     .version_id = 1,
     .minimum_version_id = 1,
+    .post_load = imx93_edma_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(mgmt, IMX93EdmaState, IMX93_EDMA_MGMT_REGS),
         VMSTATE_STRUCT_ARRAY(chan, IMX93EdmaState, IMX93_EDMA_MAX_CHANNELS, 1,
