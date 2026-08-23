@@ -266,10 +266,32 @@ static void imx93_ccm_init(Object *obj)
     }
 }
 
+/*
+ * The audio root clocks (pdm_root, spdif_root) are derived from the CCM's
+ * register state and propagated to their consumers (MICFIL, XCVR), which read
+ * the rate live and do not migrate it themselves. The registers migrate but the
+ * derived clock outputs do not, so without a post_load a destination would run
+ * those consumers at the reset-era rate rather than the migrated one (e.g. a
+ * gated-off audio clock would come back clocked). Re-derive the audio roots from
+ * the loaded registers, exactly as reset does. The TPM clocks are deliberately
+ * excluded: each TPM migrates its own input clock via VMSTATE_CLOCK, so
+ * re-propagating here would needlessly re-run its ClockUpdate over the restored
+ * counter.
+ */
+static int imx93_ccm_post_load(void *opaque, int version_id)
+{
+    IMX93CCMState *s = opaque;
+
+    imx93_ccm_update_audio_clock(s, CCM_ROOT_PDM);
+    imx93_ccm_update_audio_clock(s, CCM_ROOT_SPDIF);
+    return 0;
+}
+
 static const VMStateDescription vmstate_imx93_ccm = {
     .name = TYPE_IMX93_CCM,
     .version_id = 1,
     .minimum_version_id = 1,
+    .post_load = imx93_ccm_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, IMX93CCMState, IMX93_CCM_NUM_REGS),
         VMSTATE_END_OF_LIST()
