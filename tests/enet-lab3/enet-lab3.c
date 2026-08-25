@@ -482,15 +482,23 @@ int main(int argc, char **argv)
             }
         }
 
-        /* Only ever fail if we have NEVER completed a round. */
+        /*
+         * Only ever fail if we have NEVER completed a round. Report only what
+         * this node's vantage can see: no valid frames from the required peers
+         * arrived before the deadline. That is a true statement about OUR gate;
+         * it is NOT evidence the peer was absent - this node cannot tell ABSENT
+         * (never launched) from SILENT (up but not seen here). The coordinator,
+         * which sees the whole segment, decides INCONCLUSIVE vs FAIL. (holobench)
+         */
         if (!passed_once && t >= deadline) {
-            printf("ENET-LAB3 FAIL: deadline, missing peers:");
+            printf("ENET-LAB3 FAIL: deadline, no frames from required peer(s):");
             for (int i = 0; i < npeers; i++) {
                 if (!seen[i]) {
                     printf(" 0x%04x", peers[i]);
                 }
             }
-            printf("\n");
+            printf(" - ABSENT or SILENT, this node cannot tell which; "
+                   "coordinator decides INCONCLUSIVE vs FAIL\n");
             return 1;
         }
 
