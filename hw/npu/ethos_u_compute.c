@@ -759,10 +759,51 @@ static void ethos_u_exec_elementwise(EthosUState *s, const EthosUOpDesc *op)
     ifm = ethos_u_load_fm(s, op->ifm_addr, op->ifm_layout, op->ifm_h,
                           op->ifm_w, op->ifm_c, op->ifm_stride_y,
                           op->ifm_stride_x, op->ifm_stride_c);
-    ifm2 = ethos_u_load_fm(s, op->ifm2_addr, op->ifm_layout, op->ifm_h,
-                           op->ifm_w, op->ifm_c, op->ifm2_stride_y,
-                           op->ifm2_stride_x, op->ifm2_stride_c);
-    if (!ifm || !ifm2) {
+    if (!ifm) {
+        return;
+    }
+    /*
+     * IFM2 may be a register, not a buffer, and may be broadcast -- exactly as
+     * on the int32 path above. Vela emits the scalar form for a constant
+     * operand, e.g. the (x - mean) * (1/std) normalisation at a network input:
+     * IFM2_BROADCAST gets the scalar bit and NPU_SET_IFM2_BASE0 is never
+     * written. Loading from ifm2_addr regardless reads unrelated guest memory
+     * and silently corrupts the operation.
+     */
+    if (op->ifm2_broadcast & ETHOS_U_IFM2_SCALAR) {
+        ifm2 = g_new(int8_t, n);
+        memset(ifm2, (int8_t)op->ifm2_scalar, n);
+    } else if (op->ifm2_broadcast & (ETHOS_U_IFM2_BC_H | ETHOS_U_IFM2_BC_W |
+                                     ETHOS_U_IFM2_BC_C)) {
+        int bh = op->ifm2_broadcast & ETHOS_U_IFM2_BC_H;
+        int bw = op->ifm2_broadcast & ETHOS_U_IFM2_BC_W;
+        int bc = op->ifm2_broadcast & ETHOS_U_IFM2_BC_C;
+        int h2 = bh ? 1 : op->ifm_h;
+        int w2 = bw ? 1 : op->ifm_w;
+        int c2 = bc ? 1 : op->ifm_c;
+        g_autofree int8_t *small =
+            ethos_u_load_fm(s, op->ifm2_addr, op->ifm_layout, h2, w2, c2,
+                            op->ifm2_stride_y, op->ifm2_stride_x,
+                            op->ifm2_stride_c);
+        if (!small) {
+            return;
+        }
+        ifm2 = g_new(int8_t, n);
+        for (int y = 0; y < op->ifm_h; y++) {
+            for (int x = 0; x < op->ifm_w; x++) {
+                for (int c = 0; c < op->ifm_c; c++) {
+                    int sy2 = bh ? 0 : y, sx2 = bw ? 0 : x, sc2 = bc ? 0 : c;
+                    ifm2[(size_t)(y * op->ifm_w + x) * op->ifm_c + c] =
+                        small[(size_t)(sy2 * w2 + sx2) * c2 + sc2];
+                }
+            }
+        }
+    } else {
+        ifm2 = ethos_u_load_fm(s, op->ifm2_addr, op->ifm_layout, op->ifm_h,
+                               op->ifm_w, op->ifm_c, op->ifm2_stride_y,
+                               op->ifm2_stride_x, op->ifm2_stride_c);
+    }
+    if (!ifm2) {
         return;
     }
     /* unsigned (uint8): rebias both inputs to int8; zero-points shift -128. */
