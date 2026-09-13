@@ -135,6 +135,10 @@ groups:
         evidence: "Real V4L2 frames to /dev/video0; v4l2-compliance 48/48 ioctl + 55/55 streaming"
         tests: [imx93-isi-test, imx93-pca9538-test]
         notes: "Camera chip-IDs are the real datasheet values AND driver-validated: ov5640 0x5640 (ov5640_check_chip_id errors otherwise), mt9m114 0x2481. The PCA9538 camera expander (0x70 on LPI2C8) resets to its TI-datasheet POR (config 0xFF = all inputs, output 0xFF), not memset-0's all-outputs; imx93-pca9538-test drives a real LPI2C8 master transaction to read it back, mutation-proven"
+      - block: "Camera → LCD (vision transport)"
+        tier: A
+        evidence: "A real photograph in over the CSI, out on the adv7535 HDMI display, with no ISP in the path. Two independent proofs: the guest's FNV-1a hash of the captured frame equals a host-staged frame (bytes crossed intact), and a screendump of the display correlates against the source at r=0.9986 (pixels actually scanned out). Three distinct frames are staged and the captured hashes are required to vary, so the result means per-frame capture, not one frame re-served"
+        notes: "tests/camera-to-display/run.sh. One prebuilt dtb (imx93-11x11-evk-mt9m114.dtb) carries both the mt9m114 camera and the adv7535 display — no overlay/splice, unlike the i.MX95. The ISI serves its synthetic gradient SILENTLY on a short per-frame read (wrong geometry), so the host-staged-hash comparison is load-bearing: a gradient substitution hashes to no staged frame and fails honestly. This caught a real geometry error during bring-up (frames staged at 640x480 vs the negotiated 1280x720)"
       - block: "SAI3 + WM8962 codec"
         tier: A
         evidence: "Real PCM playback ASSERTED on the captured samples: run.sh always captures to a wav (driver=wav opens a file, never a device - simultaneously the mute and the evidence) and check_wav.py requires peak == 8000, ~1s of signal, and a 436 Hz tone, so a datapath that scaled, truncated or mis-paced the stream fails. Mutation-verified: halving the amplitude and dropping half the samples each fail, and each is missed by the other's gate. TCSR/RCSR FIFO request/warning flags gated on TE/RE - a disabled transmitter reports no FIFO request, matching the RM"
@@ -230,6 +234,9 @@ readme_groups:
   - { label: "Camera — MT9M114/OV5640 → CSI → ISI → V4L2", tier: A,
       evidence: "5/5 byte-checked frames off /dev/video0 (parallel + MIPI-CSI2); host-image virtual camera",
       blocks: ["ISI + MIPI-CSI + MT9M114 / OV5640"] }
+  - { label: "Camera → LCD — the vision transport path end to end", tier: A,
+      evidence: "a smart-camera frame in over the CSI, out on the adv7535 HDMI display (one prebuilt dtb carries both): capture hash == a host-staged frame, three distinct frames prove per-frame capture, display correlation r=0.9986",
+      blocks: ["Camera → LCD (vision transport)"] }
   - { label: "Audio — SAI3/WM8962 play + capture", tier: A,
       evidence: "Real PCM via cyclic eDMA2; -audio driver=wav captures the played square wave and the test asserts its values - peak, a full second of signal, and the tone - at TWO rates (48 kHz and 16 kHz), because a model that assumes one rate is invisible to a test that only asks for that rate. The WM8962 decodes its clocking and drives the rate to the SAI, which is the bit-clock slave; cut that wire and the 16 kHz case goes red. Concurrent streams",
       blocks: ["SAI3 + WM8962 codec"] }

@@ -112,6 +112,7 @@ thing fleet-wide.
 | Storage — uSDHC | A | SDHCI ADMA; ext4 mmcblk0 r/w/sync from -drive if=sd |
 | Display — LCDIFv3 → DSI → ADV7535 → HDMI (+ LVDS) | A | 1920x1080 /dev/fb0, framebuffer scanned out + screendump byte-correct; fbcon login |
 | Camera — MT9M114/OV5640 → CSI → ISI → V4L2 | A | 5/5 byte-checked frames off /dev/video0 (parallel + MIPI-CSI2); host-image virtual camera |
+| Camera → LCD — the vision transport path end to end | A | a smart-camera frame in over the CSI, out on the adv7535 HDMI display (one prebuilt dtb carries both): capture hash == a host-staged frame, three distinct frames prove per-frame capture, display correlation r=0.9986 |
 | Audio — SAI3/WM8962 play + capture | A | Real PCM via cyclic eDMA2; -audio driver=wav captures the played square wave and the test asserts its values - peak, a full second of signal, and the tone - at TWO rates (48 kHz and 16 kHz), because a model that assumes one rate is invisible to a test that only asks for that rate. The WM8962 decodes its clocking and drives the rate to the SAI, which is the bit-clock slave; cut that wire and the 16 kHz case goes red. Concurrent streams |
 | PXP 2D (G2D) | A | copy/fill/blit/src-over-blend/rotate byte-exact (libg2d -> /dev/pxp_device -> model); use-g2d=true Weston composites through it |
 | LPUART ×8 | A | Serial console; DMA-mode RX (cyclic eDMA); board-to-board byte-exact |
