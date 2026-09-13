@@ -32,6 +32,7 @@
 #include "system/dma.h"
 #include "qemu/timer.h"
 #include "qapi/error.h"
+#include "qemu/error-report.h"
 #include "migration/vmstate.h"
 #include <glob.h>
 
@@ -204,6 +205,21 @@ static void imx93_isi_frame_tick(void *opaque)
     if (host_src && width && height && pitch) {
         bpp = pitch / width ? pitch / width : 4;
         have_host_frame = imx93_isi_next_frame(s, (size_t)width * height * bpp);
+        if (!have_host_frame) {
+            /*
+             * A frame source IS configured but the next frame could not be read
+             * at the negotiated geometry (wrong-size *.raw, truncated file). We
+             * are about to scan the synthetic gradient instead - and a capture of
+             * that looks perfectly healthy, so say so rather than fail silently.
+             * warn_report_once: a cyclic capture would otherwise repeat it 30x/s.
+             */
+            warn_report_once("imx93-isi: host frame source '%s' is configured but "
+                             "a %ux%u frame of %zu bytes could not be read; "
+                             "scanning the synthetic gradient instead - a capture "
+                             "will look healthy but is NOT your frame",
+                             s->frames_path, width, height,
+                             (size_t)width * height * bpp);
+        }
     }
 
     if (buf && width && height && pitch) {
