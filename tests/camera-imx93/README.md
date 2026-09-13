@@ -44,8 +44,8 @@ through the ISI (mt9m114, ov5640, or a custom one).
 Frames must be **raw and packed** in the pixel format the guest's V4L2 client
 negotiates: `width * height * bytes-per-pixel`, with no row padding (the ISI
 applies the output pitch when it writes to guest memory). Discover the geometry
-from the oracle's `S_FMT` line — e.g. `fmt 640x480 fourcc=YUYV … bpl=3840` means
-width 640, height 480, bytes-per-pixel = bpl/width.
+from the oracle's `S_FMT` line — e.g. `fmt 1280x720 fourcc=YUYV … bpl=3840` means
+width 1280, height 720, bytes-per-pixel = bpl/width = 3.
 
 Produce raw frames from real images with ffmpeg (no model dependency):
 
